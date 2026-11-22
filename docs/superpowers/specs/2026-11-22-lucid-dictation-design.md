@@ -203,6 +203,7 @@ The LLM result is rejected, and the rules output used instead, when any of these
 | Grew | output has more than 1.2 × input words plus 5 |
 | Invented or reordered words | more than 15% of output words cannot be lined up, in order, with the input (35% at Medium). One word is always allowed. |
 | Over-deleted | output has under 30% of input words (Light only, not applied at Medium) |
+| Dropped words | a stretch of meaningful words is missing, and no correction, restart or joined word explains it (Light only) |
 
 Known wrappers such as quotation marks, code fences and "Here is the cleaned text:" are
 stripped before the checks. Thresholds are constants tuned against the test set in build
@@ -222,7 +223,7 @@ stage 2, and the deterministic effects below are applied last.
 | Category | Examples | Effect |
 |---|---|---|
 | email | Mail, Outlook | Complete sentences and paragraphs. |
-| chat | Slack, Teams, Messages, WhatsApp, Discord | Casual. A single-sentence message loses its trailing full stop. |
+| chat | Slack, Teams, Messages, WhatsApp, Discord | Casual. A message of one or two sentences loses its closing full stop. |
 | code | Terminal, iTerm, VS Code, Cursor, Claude, ChatGPT | Fillers and corrections removed. No list or paragraph formatting. Technical terms kept verbatim. |
 | other | everything else | Default. |
 
@@ -232,7 +233,7 @@ stage 2, and the deterministic effects below are applied last.
 |---|---|---|---|
 | Off | tags and line-break commands only | no | Nothing else. Verbatim. |
 | Light | yes | yes | Fillers, false starts, self-corrections, punctuation, lists. Every other word kept. |
-| Medium | yes | yes | Light, plus tightening of wordy phrasing and grammar. Meaning and tone kept. Nothing added. |
+| Medium | yes | yes | Light, plus tightening of wordy phrasing and grammar. Meaning and tone kept. Nothing added. Needs the optional general model. |
 
 ## 8. Storage
 
@@ -274,17 +275,26 @@ Target, measured from end of speech to text inserted:
 
 Every dictation records per-stage timings in history, so real-world figures are visible.
 
-Models are chosen by measurement in build step 2, not assumed:
+The models were chosen by measurement. The numbers, the method and the weaknesses found
+are in [`docs/benchmarks.md`](../../benchmarks.md).
 
-- **Speech**: Whisper large-v3-turbo, quantised, is the default. It is compared with the
-  unquantised build and with small.en for speed and for accuracy on the test clips.
-- **Cleanup**: candidates are Gemma 4 E4B, Qwen 3.5 4B, Llama 3.2 3B, Phi-4 Mini and
-  S1-mini, each subject to a GGUF build being available. Each is scored on the cleanup
-  test set and timed on this Mac. The highest-scoring model that meets the latency target
-  wins. Ties go to the smaller model.
+- **Speech**: Whisper large-v3-turbo, quantised (547 MB). Clips up to 14 seconds use half
+  of Whisper's audio window, which halves the time with the same text.
+- **Cleanup at Light**: S1-mini by Superwhisper (462 MB), a small model trained to clean
+  speech transcripts. It scored 50 of 51 on the test set with a median of 99 ms, and was
+  the highest-scoring model that met the latency target. It takes its own input format
+  and has no input for dictionary terms or the mid-sentence flag, so those are handled
+  by the rules that run after it.
+- **Cleanup at Medium**: Qwen 3.5 4B (2.6 GB) with Lucid's own prompt. S1-mini is not
+  built to tighten wording. Qwen scored 51 of 51 but is about seven times slower, so it
+  is an optional download and is used only for Medium.
 
-If no model meets the target, the first version ships with the fastest model that passes
-the conservative-editing tests, and the measured latency is reported rather than hidden.
+Measured end to end with S1-mini: about 0.6 s for a five-word phrase and 1.0 to 1.2 s for
+a 14-second dictation, against targets of 1.0 s and 1.5 s. Dictations over about 30
+seconds exceed the 3.0 s ceiling: a 35-second one takes about 3.2 s.
+
+Gemma 4 E4B and Phi-4 Mini were listed as candidates and were not tested. Gemma's file is
+4.9 GB, larger than Qwen's, and Phi-4 Mini is older than the models that were tested.
 
 ## 11. Testing
 
