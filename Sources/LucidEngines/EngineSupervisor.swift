@@ -35,8 +35,10 @@ public actor EngineSupervisor {
             PidFile.killStale(at: pidFile, names: Self.engineNames)
             clearedStale = true
         }
-        if wantSpeech, speech?.isRunning != true { speech = try launchSpeech() }
-        if wantCleanup, cleanup?.isRunning != true { cleanup = try launchCleanup() }
+        let launchingSpeech = wantSpeech && speech?.isRunning != true
+        let launchingCleanup = wantCleanup && cleanup?.isRunning != true
+        if launchingSpeech { speech = try launchSpeech() }
+        if launchingCleanup { cleanup = try launchCleanup() }
         if tracksProcesses {
             let running = [speech, cleanup].compactMap { $0 }.filter(\.isRunning).map(\.processIdentifier)
             PidFile.write(running, to: pidFile)
@@ -48,6 +50,21 @@ public actor EngineSupervisor {
         } catch {
             stop()
             throw error
+        }
+        await warmUp(speech: launchingSpeech, cleanup: launchingCleanup)
+    }
+
+    /// The first request to each engine is slow: the speech engine builds its compute graph,
+    /// and the cleanup engine reads its fixed prompt. Doing both now means the first dictation
+    /// is not the one that pays, or that times out.
+    private func warmUp(speech warmSpeech: Bool, cleanup warmCleanup: Bool) async {
+        if warmSpeech, let client = try? transcriber() {
+            let silence = WAV.encode(samples: [Int16](repeating: 0, count: 16_000))
+            _ = try? await client.transcribe(wav: silence, prompt: "")
+        }
+        if warmCleanup, let client = try? cleaner() {
+            let request = CleanupRequest(transcript: "this is a warm up sentence for the cleanup model")
+            _ = try? await client.clean(request, timeout: 60)
         }
     }
 

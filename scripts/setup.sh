@@ -16,7 +16,7 @@ for arg in "$@"; do
       echo "Installs whisper.cpp and llama.cpp with Homebrew, then downloads:"
       echo "  - the speech model, Whisper large-v3-turbo (547 MB)"
       echo "  - the cleanup model, S1-mini by Superwhisper (462 MB)"
-      echo "  --with-general also downloads Llama 3.2 3B (1.9 GB), used for the Medium level."
+      echo "  --with-general also downloads Qwen 3.5 4B (2.6 GB), used for the Medium level."
       exit 0
       ;;
     *)
@@ -82,8 +82,8 @@ fetch "$HF/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin" \
 fetch "$HF/superwhisper/s1-mini-GGUF/resolve/main/s1-mini-q4_k_m.gguf" \
   s1-mini-q4_k_m.gguf 484219808
 if [ "$WITH_GENERAL" -eq 1 ]; then
-  fetch "$HF/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf" \
-    Llama-3.2-3B-Instruct-Q4_K_M.gguf 2019377696
+  fetch "$HF/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf" \
+    Qwen3.5-4B-Q4_K_M.gguf 2740937888
 fi
 
 echo

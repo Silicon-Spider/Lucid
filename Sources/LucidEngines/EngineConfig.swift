@@ -25,7 +25,8 @@ public struct EngineConfig: Equatable, Sendable {
     public static let defaultSpeechModel = "ggml-large-v3-turbo-q5_0.bin"
     /// S1-mini by Superwhisper.
     public static let s1Mini = CleanupModel(fileName: "s1-mini-q4_k_m.gguf", style: .s1)
-    public static let general = CleanupModel(fileName: "Llama-3.2-3B-Instruct-Q4_K_M.gguf", style: .general)
+    /// Qwen 3.5 4B, driven by Lucid's own prompt. Slower and larger, and able to do the Medium level.
+    public static let general = CleanupModel(fileName: "Qwen3.5-4B-Q4_K_M.gguf", style: .general)
 
     /// `~/Library/Application Support/Lucid`
     public static var supportDirectory: URL {

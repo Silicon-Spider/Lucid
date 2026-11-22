@@ -231,10 +231,6 @@ func runEval(_ arguments: Arguments) async throws -> Int32 {
         cleaner = try await supervisor.cleaner()
     }
     let pipeline = Pipeline(cleaner: cleaner)
-    if cleaner != nil {
-        // Warm the model, so the first case is not charged for loading the prompt.
-        _ = await pipeline.process("this is a warm up sentence for the cleanup model", context: PipelineContext())
-    }
 
     struct Outcome {
         let testCase: EvalCase
@@ -253,6 +249,7 @@ func runEval(_ arguments: Arguments) async throws -> Int32 {
         print("      in:  \(item.testCase.input)")
         print("      out: \(String(reflecting: item.result.finalText))")
         if let fallback = item.result.fallback { print("      fallback: \(fallback.rawValue)") }
+        if let rejected = item.result.rejectedReply { print("      rejected reply: \(String(reflecting: rejected))") }
         for failure in item.failures { print("      - \(failure)") }
     }
 
