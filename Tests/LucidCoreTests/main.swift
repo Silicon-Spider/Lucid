@@ -15,5 +15,6 @@ await continuationTests()
 whisperWindowTests()
 evalCaseTests()
 await engineTests()
+clientTests()
 
 TestRun.shared.finish()
