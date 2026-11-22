@@ -13,5 +13,6 @@ await pipelineTests()
 promptStyleTests()
 await continuationTests()
 whisperWindowTests()
+evalCaseTests()
 
 TestRun.shared.finish()
