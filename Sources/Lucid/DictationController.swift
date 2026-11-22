@@ -160,4 +160,42 @@ final class DictationController {
         }
         onHistoryChange?()
     }
+
+    /// Runs a kept recording through the engines again and copies the result. It does not
+    /// paste, because the user is looking at their history, not at their document.
+    func retry(_ entry: HistoryEntry) async {
+        guard machine.state == .idle else { return }
+        guard let url = history.audioURL(for: entry), let wav = try? Data(contentsOf: url) else {
+            pill.flash("That recording is no longer kept")
+            return
+        }
+        pill.show(.processing)
+        let dictionary = (try? PersonalDictionary.load(from: AppSettings.dictionaryURL)) ?? .empty
+        let context = PipelineContext(
+            level: settings.level,
+            category: AppCategory.forBundleID(entry.bundleID),
+            dictionary: dictionary
+        )
+        do {
+            let outcome = try await engines.dictate(wav: wav, context: context)
+            history.remove(entry.id)
+            history.add(
+                HistoryEntry(
+                    date: Date(),
+                    appName: entry.appName,
+                    bundleID: entry.bundleID,
+                    audioSeconds: entry.audioSeconds,
+                    speechMillis: outcome.speechMillis,
+                    result: outcome.result,
+                    failure: nil
+                ),
+                wav: wav
+            )
+            TextInserter.copy(outcome.result.finalText)
+            pill.flash("Copied. Press ⌘V")
+        } catch {
+            pill.flash("Still couldn't transcribe that", seconds: 3)
+        }
+        onHistoryChange?()
+    }
 }

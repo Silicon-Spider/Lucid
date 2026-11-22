@@ -34,6 +34,13 @@ final class EngineManager: ObservableObject {
         supervisor = EngineSupervisor(config: .standard(cleanup: cleanupModel), tracksProcesses: tracksProcesses)
     }
 
+    /// A manager frozen in one state, for drawing views without starting any engine.
+    static func preview(_ status: Status) -> EngineManager {
+        let manager = EngineManager(level: .light, tracksProcesses: false)
+        manager.status = status
+        return manager
+    }
+
     /// True when the optional general model, used for the Medium level, has been downloaded.
     static var generalModelInstalled: Bool {
         FileManager.default.fileExists(atPath: EngineConfig.standard(cleanup: EngineConfig.general).cleanupModelURL.path)
