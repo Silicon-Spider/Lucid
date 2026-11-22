@@ -17,5 +17,6 @@ evalCaseTests()
 await engineTests()
 clientTests()
 dictationMachineTests()
+insertionTests()
 
 TestRun.shared.finish()
