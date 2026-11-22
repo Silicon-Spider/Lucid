@@ -6,5 +6,6 @@ harnessTests()
 rulesCleanerTests()
 guardrailsTests()
 dictionaryTests()
+styleRulesTests()
 
 TestRun.shared.finish()
