@@ -10,5 +10,6 @@ styleRulesTests()
 promptBuilderTests()
 audioTests()
 await pipelineTests()
+promptStyleTests()
 
 TestRun.shared.finish()
