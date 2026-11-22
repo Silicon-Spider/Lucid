@@ -21,6 +21,14 @@ if let index = launchArguments.firstIndex(of: "--render-ui"), index + 1 < launch
 }
 
 let application = NSApplication.shared
+
+// Headless mode: print the menu as text.
+if launchArguments.contains("--dump-menu") {
+    let lines = MainActor.assumeIsolated { AppDelegate().menuLines() }
+    print(lines.joined(separator: "\n"))
+    exit(0)
+}
+
 let appDelegate = MainActor.assumeIsolated { AppDelegate() }
 application.delegate = appDelegate
 application.setActivationPolicy(.accessory)

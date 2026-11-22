@@ -141,6 +141,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(actionItem("Quit Lucid", #selector(quit), key: "q"))
     }
 
+    /// The menu as indented lines of text, for checking it without a screen.
+    func menuLines() -> [String] {
+        let menu = NSMenu()
+        menuNeedsUpdate(menu)
+        func lines(_ menu: NSMenu, indent: String) -> [String] {
+            menu.items.flatMap { item -> [String] in
+                if item.isSeparatorItem { return [indent + "---"] }
+                let mark = item.state == .on ? "✓ " : ""
+                let dimmed = item.isEnabled ? "" : "  (disabled)"
+                let own = [indent + mark + item.title + dimmed]
+                return own + (item.submenu.map { lines($0, indent: indent + "    ") } ?? [])
+            }
+        }
+        return lines(menu, indent: "")
+    }
+
     private var statusLine: String {
         if !Permissions.accessibility { return "Lucid needs Accessibility access" }
         if !hotkeys.isRunning { return "Restart Lucid to finish setting up" }
