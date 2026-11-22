@@ -685,7 +685,7 @@ public enum RulesCleaner {
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `scripts/test.sh RulesCleaner`
-Expected: every line under `RulesCleaner` starts with `ok`, and the last line is `PASSED  19 tests, 34 checks`.
+Expected: every line under `RulesCleaner` starts with `ok`, and the last line is `PASSED  19 tests, 35 checks`.
 
 - [ ] **Step 6: Commit**
 
@@ -2428,7 +2428,7 @@ Expected: every line under `Pipeline` starts with `ok`, and the last line is `PA
 - [ ] **Step 5: Run the whole suite**
 
 Run: `scripts/test.sh`
-Expected: eight suites are listed (`Harness`, `RulesCleaner`, `Guardrails`, `PersonalDictionary`, `StyleRules`, `PromptBuilder`, `Audio`, `Pipeline`), no line starts with `FAIL`, and the last line is `PASSED  72 tests, 201 checks`.
+Expected: eight suites are listed (`Harness`, `RulesCleaner`, `Guardrails`, `PersonalDictionary`, `StyleRules`, `PromptBuilder`, `Audio`, `Pipeline`), no line starts with `FAIL`, and the last line is `PASSED  72 tests, 202 checks`.
 
 - [ ] **Step 6: Check the release build**
 
