@@ -1,1 +1,183 @@
 # Lucid
+
+Hold a key, speak, let go. Clean text appears where your cursor is, in any Mac app.
+
+Lucid removes the "um"s, the false starts and the "no wait, I meant…" before the text
+lands, so what you get reads as if you had typed it. Everything runs on your Mac. No
+audio and no text is sent anywhere.
+
+| You say | Lucid writes |
+|---|---|
+| "Um, so I was thinking we could, uh, meet at two, actually no, make that three, at the usual place." | So I was thinking we could meet at 3 at the usual place. |
+| "What is the capital of France, and, um, what is its population?" | What is the capital of France, and what is its population? |
+
+The second row matters: Lucid cleans a dictated question. It never answers it.
+
+## Status
+
+This is a first version. The speech and cleanup pipeline is tested and measured, with
+results in [`docs/benchmarks.md`](docs/benchmarks.md). The parts that need a person at
+the keyboard (the dictation key, the microphone, pasting) were built carefully but have
+only been checked by hand-run steps, listed under [Check it works](#check-it-works).
+
+## Requirements
+
+- A Mac with Apple Silicon, running macOS 14 or later.
+- [Homebrew](https://brew.sh).
+- The Swift compiler. `xcode-select --install` provides it. Xcode is not needed.
+- About 1.1 GB of disk for the models, and about 2.5 GB of memory while Lucid runs.
+
+## Install
+
+```bash
+git clone https://github.com/Silicon-Spider/Lucid.git
+cd Lucid
+scripts/setup.sh        # installs the engines, downloads the models (about 1 GB)
+scripts/build-app.sh    # builds dist/Lucid.app
+open dist/Lucid.app
+```
+
+A waveform icon appears in the menu bar, and a setup checklist opens. It walks you through
+four things:
+
+1. **Microphone.** Allow it when asked.
+2. **Accessibility.** Switch Lucid on in System Settings, Privacy & Security,
+   Accessibility. Lucid needs this to see the dictation key and to type for you. If the
+   checklist then offers Restart Lucid, press it.
+3. **Speech engines and models.** Ticked once `scripts/setup.sh` has run.
+4. **The dictation key.** On a MacBook this is Fn. macOS also uses Fn for its own
+   shortcut, so set "Press 🌐 key to" to "Do Nothing" in Keyboard settings, or choose
+   Right Option in the checklist.
+
+To keep Lucid, move `dist/Lucid.app` to your Applications folder.
+
+**After rebuilding.** The app is signed locally, and macOS ties the Accessibility grant
+to the exact build. After running `scripts/build-app.sh` again, switch Lucid off and on
+in the Accessibility list.
+
+## Use
+
+| Do this | To |
+|---|---|
+| Hold the dictation key, speak, let go | Dictate |
+| Tap the key twice | Keep recording hands-free. Press the key once to finish. |
+| Press Escape while recording | Cancel |
+| Say "new line" or "new paragraph" as its own phrase | Start a new line or paragraph |
+
+A small pill at the bottom of the screen shows bars while it listens and dots while it
+works. If there is nowhere to type, the text is left on the clipboard and the pill says so.
+
+### Cleanup levels
+
+Choose one from the menu or in Settings.
+
+| Level | What it does |
+|---|---|
+| Off | Inserts exactly what you said. |
+| Light (default) | Removes fillers, false starts and corrections. Fixes punctuation. Formats spoken lists. Keeps every other word. |
+| Medium | Also tightens wordy phrasing. Slower. Needs an extra 2.6 GB model: `scripts/setup.sh --with-general`. |
+
+Lucid also adapts to where you are typing. In chat apps a short message loses its closing
+full stop. In terminals, editors and AI chat apps it does not format lists.
+
+### Your words
+
+In Settings, Dictionary:
+
+- **Words to spell exactly**: names, products and jargon, such as GitHub.
+- **Corrections**: when Lucid keeps mishearing something, say what to write instead.
+
+### History
+
+Settings, History lists your dictations. Each one keeps its original wording, so you can
+always get back what you actually said. A dictation that failed can be retried from its
+recording. The last 20 recordings are kept for 7 days. You can switch that off in
+Settings.
+
+## How it works
+
+```
+hold key ─▶ record ─▶ Whisper (speech to text) ─▶ rules ─▶ S1-mini (cleanup)
+                                                              │
+                         paste at cursor ◀─ your dictionary ◀─ guardrails
+```
+
+1. **Speech to text.** Whisper large-v3-turbo, run by whisper.cpp.
+2. **Rules.** Instant, exact edits: plain fillers, stutters, spoken line breaks.
+3. **Cleanup.** S1-mini by Superwhisper, a small model trained for exactly this job, run
+   by llama.cpp.
+4. **Guardrails.** Lucid checks the model's work. If it added words, answered a question,
+   or dropped part of what you said, its reply is thrown away and the rules output is
+   used instead. A dictation is never lost.
+
+Measured on an M4 MacBook Air: about 0.6 s for a short phrase and about 1 s for a
+14-second dictation, from letting go of the key to seeing the text. Dictations longer
+than about 30 seconds take over 3 s.
+
+The design draws on how Wispr Flow and Google's Rambler work. The research is in
+[`docs/research.md`](docs/research.md) and the full design in
+[`docs/superpowers/specs`](docs/superpowers/specs).
+
+## Command line
+
+`lucid-cli` runs the same pipeline without the app:
+
+```bash
+swift run lucid-cli doctor                         # are the engines and models installed?
+swift run lucid-cli clean "um, so, like, hello"    # clean up some text
+swift run lucid-cli dictate recording.wav          # audio to clean text, with timings
+swift run lucid-cli eval                           # run the cleanup test set
+```
+
+Audio files must be 16 kHz mono 16-bit WAV.
+
+## Check it works
+
+```bash
+scripts/test.sh           # unit tests
+scripts/integration.sh    # the whole pipeline on synthesised speech
+```
+
+Then by hand, with Lucid running:
+
+1. Open Notes. Hold the key and say "Um, so let's meet at two, actually three". Let go.
+   "So let's meet at 3." appears.
+2. Type a word with no space after it, then dictate. A space is added first.
+3. Hold the key and press Escape. Nothing is inserted.
+4. Tap the key twice, speak, then press it once. The text appears.
+5. Hold the key and say nothing. The pill says "Didn't catch that".
+6. Click the Desktop, then dictate. The pill says "Copied. Press ⌘V".
+7. Quit Lucid. `pgrep -f "whisper-server|llama-server"` prints nothing.
+
+## Troubleshooting
+
+| Problem | Try |
+|---|---|
+| The key does nothing | Open Setup Checklist from the menu. Accessibility is the usual cause, especially after a rebuild. |
+| Holding Fn opens the emoji picker or changes keyboard | Set "Press 🌐 key to" to "Do Nothing" in Keyboard settings, or switch to Right Option. |
+| The menu says "Setup needed" | Run `scripts/setup.sh`, then quit and reopen Lucid. |
+| The first word is cut off | The microphone takes a moment to start. Pause briefly after pressing the key. |
+| Text goes to the clipboard instead of being typed | The focused control is not a text field, or it is a password field. Press ⌘V where you want it. |
+| Something else | Engine logs are in `~/Library/Logs/Lucid/`. They never contain what you said. |
+
+## Limits
+
+- English only.
+- Lucid uses the Mac's default microphone. Change it in System Settings, Sound.
+- Pasting uses ⌘V, so it assumes a keyboard layout where that works.
+- Speech recognition was measured with synthesised speech, not a range of real voices and
+  rooms. See [`docs/benchmarks.md`](docs/benchmarks.md) for what was and was not tested.
+
+## Credits and licence
+
+Lucid is free software under the [GNU General Public License, version 3](LICENSE).
+
+It is built on:
+
+- [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and OpenAI's Whisper large-v3-turbo, for speech recognition.
+- [llama.cpp](https://github.com/ggml-org/llama.cpp), for running the cleanup models.
+- [S1-mini by Superwhisper](https://huggingface.co/superwhisper/s1-mini-GGUF), the cleanup model.
+- [Qwen 3.5 4B](https://huggingface.co/unsloth/Qwen3.5-4B-GGUF), the optional model for the Medium level.
+
+The models are downloaded by `scripts/setup.sh` and are not part of this repository. Each
+has its own licence.

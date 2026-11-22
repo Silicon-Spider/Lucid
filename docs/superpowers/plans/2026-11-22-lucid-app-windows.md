@@ -1516,7 +1516,7 @@ scripts/integration.sh 2>&1 | grep -E "cleaned|timing"
 scripts/build-app.sh | tail -1
 ```
 
-Expected: `PASSED  134 tests, 392 checks`, `Build complete!`, four `cleaned` lines with four `timing` lines, and `Built dist/Lucid.app (version 0.1.0)`.
+Expected: `PASSED  136 tests, 396 checks` (two pipeline tests were added while checking the README's line-break claim), `Build complete!`, four `cleaned` lines with four `timing` lines, and `Built dist/Lucid.app (version 0.1.0)`.
 
 - [ ] **Step 3: Launch the bundle once more**
 
