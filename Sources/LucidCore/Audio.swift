@@ -28,6 +28,36 @@ public enum WAV {
         samples.withUnsafeBufferPointer { data.append($0) }
         return data
     }
+
+    /// The duration of a PCM WAV file, read from its header. Nil when the data is not a WAV.
+    public static func seconds(of data: Data) -> Double? {
+        guard data.count >= 44 else { return nil }
+        let bytes = [UInt8](data.prefix(44))
+        guard String(decoding: bytes[0..<4], as: UTF8.self) == "RIFF",
+              String(decoding: bytes[8..<12], as: UTF8.self) == "WAVE" else { return nil }
+
+        func uint16(_ offset: Int) -> Int { Int(bytes[offset]) | Int(bytes[offset + 1]) << 8 }
+        func uint32(_ offset: Int) -> Int { uint16(offset) | uint16(offset + 2) << 16 }
+
+        let bytesPerSecond = uint32(24) * uint16(22) * uint16(34) / 8
+        guard bytesPerSecond > 0 else { return nil }
+        return Double(data.count - 44) / Double(bytesPerSecond)
+    }
+}
+
+/// Whisper's encoder always processes a fixed window of audio: 1500 frames, which is 30 seconds.
+/// A smaller window is faster, but the turbo model produces garbage below half size.
+public enum WhisperWindow {
+    /// What the server takes to mean "the full window".
+    public static let full = 0
+    public static let half = 768
+    private static let framesPerSecond = 50.0
+    private static let margin = 64.0
+
+    /// The `audio_ctx` value to send for a clip of this length.
+    public static func audioContext(forSeconds seconds: Double) -> Int {
+        seconds * framesPerSecond + margin <= Double(half) ? half : full
+    }
 }
 
 /// Decides whether a recording contains anything worth transcribing.

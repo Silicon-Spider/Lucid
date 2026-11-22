@@ -12,5 +12,6 @@ audioTests()
 await pipelineTests()
 promptStyleTests()
 await continuationTests()
+whisperWindowTests()
 
 TestRun.shared.finish()
