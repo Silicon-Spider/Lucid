@@ -455,7 +455,7 @@ struct SettingsView: View {
             AboutTab()
                 .tabItem { Label("About", systemImage: "info.circle") }
         }
-        .frame(width: 560, height: 500)
+        .frame(width: 560, height: 660)
     }
 }
 
@@ -890,7 +890,6 @@ struct SetupView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 Button("Done", action: onDone)
-                    .keyboardShortcut(.defaultAction)
             }
             .padding(20)
         }
@@ -920,9 +919,7 @@ struct SetupView: View {
         SetupRow(
             done: keyReady,
             title: "Accessibility",
-            detail: setup.accessibility
-                ? "Access is granted, but macOS needs Lucid to restart before the key will work."
-                : "So Lucid can see the dictation key and type the text for you. Switch Lucid on in the list."
+            detail: accessibilityDetail
         ) {
             if setup.accessibility {
                 Button("Restart Lucid", action: onRestart)
@@ -930,6 +927,14 @@ struct SetupView: View {
                 Button("Open Accessibility Settings…") { Permissions.openAccessibilitySettings() }
             }
         }
+    }
+
+    private var accessibilityDetail: String {
+        if keyReady { return "Lucid can see the dictation key and type the text for you." }
+        if setup.accessibility {
+            return "Access is granted, but macOS needs Lucid to restart before the key will work."
+        }
+        return "So Lucid can see the dictation key and type the text for you. Switch Lucid on in the list."
     }
 
     private var enginesRow: some View {
@@ -1257,7 +1262,7 @@ and add this method after `pillViews()`:
             ))
         }
         func tab(_ view: some View) -> AnyView {
-            AnyView(view.frame(width: 560, height: 460))
+            AnyView(view.frame(width: 560, height: 620))
         }
 
         let engines = EngineManager.preview(.ready)

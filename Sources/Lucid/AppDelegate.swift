@@ -1,6 +1,7 @@
 import AppKit
 import LucidCore
 import LucidEngines
+import SwiftUI
 
 extension CleanupLevel {
     var title: String {
@@ -26,6 +27,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var signalSources: [DispatchSourceSignal] = []
     /// Set when the app is started by a script, so no system dialogs are left on screen.
     private let quiet = CommandLine.arguments.contains("--no-prompts")
+    private let windows = Windows()
+    private let setup = SetupModel()
+    private lazy var dictionaryModel = DictionaryModel()
+    private lazy var historyModel = HistoryModel(store: history)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let identifier = Bundle.main.bundleIdentifier,
@@ -56,6 +61,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if !Permissions.accessibility { Permissions.promptForAccessibility() }
         }
         startHotkeysWhenAllowed()
+
+        controller.onHistoryChange = { [weak self] in self?.historyModel.reload() }
+        setup.isListening = { [weak self] in self?.hotkeys.isRunning ?? false }
+        windows.onClose = { [weak self] kind in
+            if kind == .setup { self?.setup.stop() }
+        }
+        if !quiet, !settings.onboardingDone { showSetup() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -138,6 +150,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(actionItem("Copy Last Original", #selector(copyLastOriginal)))
         }
         menu.addItem(.separator())
+        menu.addItem(actionItem("Settings…", #selector(showSettings), key: ","))
+        menu.addItem(actionItem("Setup Checklist…", #selector(showSetup)))
+        menu.addItem(.separator())
         menu.addItem(actionItem("Quit Lucid", #selector(quit), key: "q"))
     }
 
@@ -213,13 +228,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func chooseLevel(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let level = CleanupLevel(rawValue: raw) else { return }
         settings.level = level
-        Task { await engines.setLevel(level) }
+        applyLevel(level)
     }
 
     @objc private func chooseHotkey(_ sender: NSMenuItem) {
         guard let raw = sender.representedObject as? String, let choice = HotkeyChoice(rawValue: raw) else { return }
         settings.hotkey = choice
-        hotkeys.hotkey = choice
+        applyHotkey(choice)
     }
 
     @objc private func copyEntry(_ sender: NSMenuItem) {
@@ -234,6 +249,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let original = history.entries.compactMap({ $0.result?.raw }).first else { return }
         TextInserter.copy(original)
         pill.flash("Original copied")
+    }
+
+    private func applyLevel(_ level: CleanupLevel) {
+        Task { await engines.setLevel(level) }
+    }
+
+    private func applyHotkey(_ choice: HotkeyChoice) {
+        hotkeys.hotkey = choice
+    }
+
+    @objc private func showSettings() {
+        // The dictionary may have been edited by hand since the window was last open.
+        dictionaryModel = DictionaryModel()
+        historyModel.reload()
+        windows.show(.settings) {
+            AnyView(SettingsView(
+                settings: settings,
+                engines: engines,
+                dictionary: dictionaryModel,
+                history: historyModel,
+                onHotkey: { [weak self] choice in self?.applyHotkey(choice) },
+                onLevel: { [weak self] level in self?.applyLevel(level) },
+                onRetry: { [weak self] entry in
+                    Task { await self?.controller.retry(entry) }
+                }
+            ))
+        }
+    }
+
+    @objc private func showSetup() {
+        setup.start()
+        windows.show(.setup) {
+            AnyView(SetupView(
+                setup: setup,
+                engines: engines,
+                settings: settings,
+                onUseRightOption: { [weak self] in
+                    self?.settings.hotkey = .rightOption
+                    self?.applyHotkey(.rightOption)
+                },
+                onRestart: { [weak self] in self?.restart() },
+                onDone: { [weak self] in
+                    self?.settings.onboardingDone = true
+                    self?.windows.close(.setup)
+                }
+            ))
+        }
     }
 
     @objc private func openAccessibility() { Permissions.openAccessibilitySettings() }
