@@ -8,5 +8,6 @@ guardrailsTests()
 dictionaryTests()
 styleRulesTests()
 promptBuilderTests()
+audioTests()
 
 TestRun.shared.finish()
