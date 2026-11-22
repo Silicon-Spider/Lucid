@@ -7,6 +7,7 @@ let package = Package(
     targets: [
         .target(name: "LucidCore"),
         .target(name: "LucidEngines", dependencies: ["LucidCore"]),
+        .executableTarget(name: "lucid-cli", dependencies: ["LucidCore", "LucidEngines"]),
         .executableTarget(
             name: "LucidCoreTests",
             dependencies: ["LucidCore", "LucidEngines"],
