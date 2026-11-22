@@ -112,6 +112,7 @@ public struct Pipeline: Sendable {
 
         text = context.dictionary.apply(to: text)
         text = StyleRules.apply(text, category: context.category)
+        if context.midSentence { text = StyleRules.continuingSentence(text) }
 
         return PipelineResult(
             raw: transcript,

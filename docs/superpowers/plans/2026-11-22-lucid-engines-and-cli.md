@@ -325,7 +325,7 @@ In `Sources/LucidCore/StyleRules.swift`, add this inside `enum StyleRules`, afte
         "about", "we", "you", "they", "he", "she", "it", "this", "these", "those", "there", "here",
         "my", "your", "our", "their", "is", "are", "was", "were", "will", "can", "should", "would",
         "could", "do", "does", "did", "have", "has", "had", "not", "just", "please", "let's",
-        "what", "where", "how", "why", "who", "however", "maybe", "then",
+        "what", "where", "how", "why", "who", "however", "maybe",
     ]
 
     /// When text is inserted in the middle of a sentence, its first word should not be capitalised.

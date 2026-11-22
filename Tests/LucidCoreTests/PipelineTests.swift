@@ -88,7 +88,7 @@ func pipelineTests() async {
 
             expectEqual(result.raw, "um so let's meet jon at the cafe tomorrow morning okay")
             expectEqual(result.rulesText, "So let's meet jon at the cafe tomorrow morning okay")
-            expectEqual(result.finalText, "So let's meet John at the cafe tomorrow morning, okay")
+            expectEqual(result.finalText, "so let's meet John at the cafe tomorrow morning, okay")
             expectTrue(result.llmUsed)
 
             let expected = CleanupRequest(

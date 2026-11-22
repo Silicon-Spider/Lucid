@@ -11,5 +11,6 @@ promptBuilderTests()
 audioTests()
 await pipelineTests()
 promptStyleTests()
+await continuationTests()
 
 TestRun.shared.finish()
