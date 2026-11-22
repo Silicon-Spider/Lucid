@@ -16,5 +16,6 @@ whisperWindowTests()
 evalCaseTests()
 await engineTests()
 clientTests()
+dictationMachineTests()
 
 TestRun.shared.finish()
