@@ -37,6 +37,26 @@ public struct PipelineResult: Codable, Equatable, Sendable {
     public var rejectedReply: String?
     /// Time spent in cleanup, in milliseconds. Transcription is not included.
     public var cleanMillis: Int
+
+    public init(
+        raw: String,
+        rulesText: String,
+        finalText: String,
+        llmAttempted: Bool,
+        llmUsed: Bool,
+        fallback: FallbackReason?,
+        rejectedReply: String?,
+        cleanMillis: Int
+    ) {
+        self.raw = raw
+        self.rulesText = rulesText
+        self.finalText = finalText
+        self.llmAttempted = llmAttempted
+        self.llmUsed = llmUsed
+        self.fallback = fallback
+        self.rejectedReply = rejectedReply
+        self.cleanMillis = cleanMillis
+    }
 }
 
 /// Runs the cleanup stages in order: rules, model, guardrails, dictionary, style.

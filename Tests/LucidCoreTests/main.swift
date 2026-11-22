@@ -18,5 +18,6 @@ await engineTests()
 clientTests()
 dictationMachineTests()
 insertionTests()
+historyTests()
 
 TestRun.shared.finish()
