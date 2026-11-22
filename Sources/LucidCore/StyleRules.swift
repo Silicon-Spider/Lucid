@@ -10,10 +10,10 @@ public enum StyleRules {
     /// A sentence end that has more text after it.
     private static let innerSentenceEnd = TextUtil.regex(#"[.!?…]["”’)]*\s+\S"#)
 
-    /// A one-sentence chat message reads better without its closing full stop.
+    /// A short chat message, one or two sentences, reads better without its closing full stop.
     static func droppingFinalStop(_ text: String) -> String {
         guard text.hasSuffix("."), !text.hasSuffix(".."), !text.contains("\n") else { return text }
-        if innerSentenceEnd.firstMatch(in: text, range: TextUtil.fullRange(text)) != nil { return text }
+        if innerSentenceEnd.numberOfMatches(in: text, range: TextUtil.fullRange(text)) > 1 { return text }
         // "p.m." and "e.g." end in a full stop that belongs to the word.
         let lastWord = text.split(separator: " ").last.map(String.init) ?? text
         if lastWord.dropLast().contains(".") { return text }

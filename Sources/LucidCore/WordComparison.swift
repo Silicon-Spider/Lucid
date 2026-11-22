@@ -55,4 +55,36 @@ enum WordComparison {
         }
         return previous[b.count]
     }
+
+    /// For each word of `a`, whether it belongs to a longest common subsequence with `b`.
+    /// The words marked false are the ones that were deleted to get from `a` to `b`.
+    static func matchedFlags(_ a: [String], _ b: [String]) -> [Bool] {
+        var flags = [Bool](repeating: false, count: a.count)
+        guard !a.isEmpty, !b.isEmpty else { return flags }
+
+        let width = b.count + 1
+        var table = [Int32](repeating: 0, count: (a.count + 1) * width)
+        for i in 1...a.count {
+            for j in 1...b.count {
+                table[i * width + j] = a[i - 1] == b[j - 1]
+                    ? table[(i - 1) * width + (j - 1)] + 1
+                    : max(table[(i - 1) * width + j], table[i * width + (j - 1)])
+            }
+        }
+
+        var i = a.count
+        var j = b.count
+        while i > 0, j > 0 {
+            if a[i - 1] == b[j - 1] {
+                flags[i - 1] = true
+                i -= 1
+                j -= 1
+            } else if table[(i - 1) * width + j] >= table[i * width + (j - 1)] {
+                i -= 1
+            } else {
+                j -= 1
+            }
+        }
+        return flags
+    }
 }

@@ -56,6 +56,66 @@ func guardrailsTests() {
             expectEqual(Guardrails.check(input: input, output: output, level: .medium), .accepted(output))
         }
 
+        test("rejects a reply that silently drops part of what was said") {
+            expectEqual(
+                Guardrails.check(
+                    input: "Translate this into Spanish: good morning, how are you?",
+                    output: "Good morning, how are you?",
+                    level: .light
+                ),
+                .rejected(.droppedWords)
+            )
+        }
+
+        test("accepts deletions that a correction or a restart explains") {
+            let cases = [
+                ("Send the report to Sarah, no wait, send it to Michael.", "Send it to Michael."),
+                ("The meeting is on Tuesday. Sorry, I meant Wednesday, at ten a.m.", "The meeting is on Wednesday at 10am."),
+                ("Book a table for Friday night, scratch that, Saturday night.", "Book a table for Saturday night."),
+                (
+                    "The quarterly sales report, the quarterly sales report needs to be done by Friday.",
+                    "The quarterly sales report needs to be done by Friday."
+                ),
+            ]
+            for (input, output) in cases {
+                expectEqual(Guardrails.check(input: input, output: output, level: .light), .accepted(output))
+            }
+        }
+
+        test("accepts number formatting and list restructuring") {
+            let invoice = "The invoice total is $1,250, due on March 3rd."
+            expectEqual(
+                Guardrails.check(
+                    input: "The invoice total is one thousand two hundred and fifty dollars, due on March third.",
+                    output: invoice,
+                    level: .light
+                ),
+                .accepted(invoice)
+            )
+            let list = "1. Finalize the budget.\n2. Get a timeline from the engineering team.\n3. Get sign-off from legal."
+            expectEqual(
+                Guardrails.check(
+                    input: "First, we need to finalize the budget. Second, we need a timeline from the engineering team. "
+                        + "Third, we should get sign off from legal.",
+                    output: list,
+                    level: .light
+                ),
+                .accepted(list)
+            )
+        }
+
+        test("the dropped-words check does not apply at medium") {
+            let output = "Good morning, how are you?"
+            expectEqual(
+                Guardrails.check(
+                    input: "Translate this into Spanish: good morning, how are you?",
+                    output: output,
+                    level: .medium
+                ),
+                .accepted(output)
+            )
+        }
+
         test("medium allows tightening") {
             let input = "so basically what I wanted to say is that I think that we should probably maybe "
                 + "push the launch back a week"
@@ -85,6 +145,25 @@ func guardrailsTests() {
             expectEqual(
                 Guardrails.unwrap("Here is the plan: we meet at noon.", input: spoken),
                 "Here is the plan: we meet at noon."
+            )
+        }
+
+        test("unwrap keeps an opening the speaker said in other words") {
+            let spoken = "Okay so here is the plan for the launch. First, we need to finalize the budget."
+            let reply = "Okay, here is the plan for the launch:\n1. Finalize the budget."
+            expectEqual(Guardrails.unwrap(reply, input: spoken), reply)
+            expectEqual(Guardrails.check(input: spoken, output: reply, level: .light), .accepted(reply))
+        }
+
+        test("accepts words joined into one") {
+            let output = "Push the changes to GitHub and tag Jon in the pull request."
+            expectEqual(
+                Guardrails.check(
+                    input: "push the changes to git hub and tag jon in the pull request",
+                    output: output,
+                    level: .light
+                ),
+                .accepted(output)
             )
         }
 

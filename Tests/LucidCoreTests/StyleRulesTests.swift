@@ -15,8 +15,9 @@ func styleRulesTests() {
             expectEqual(AppCategory.forBundleID(nil), .other)
         }
 
-        test("chat drops the full stop from a single sentence") {
+        test("chat drops the final full stop from a short message") {
             expectEqual(StyleRules.apply("See you soon.", category: .chat), "See you soon")
+            expectEqual(StyleRules.apply("Running late. See you soon.", category: .chat), "Running late. See you soon")
         }
 
         test("chat leaves other endings alone") {
@@ -28,7 +29,10 @@ func styleRulesTests() {
         }
 
         test("chat leaves longer messages alone") {
-            expectEqual(StyleRules.apply("Running late. See you soon.", category: .chat), "Running late. See you soon.")
+            expectEqual(
+                StyleRules.apply("Running late. Traffic is bad. See you soon.", category: .chat),
+                "Running late. Traffic is bad. See you soon."
+            )
             expectEqual(StyleRules.apply("Two things:\n1. Milk.", category: .chat), "Two things:\n1. Milk.")
         }
 

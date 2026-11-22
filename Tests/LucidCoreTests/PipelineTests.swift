@@ -70,6 +70,7 @@ func pipelineTests() async {
             expectTrue(result.llmAttempted)
             expectTrue(result.llmUsed)
             expectEqual(result.fallback, nil)
+            expectEqual(result.rejectedReply, nil)
         }
 
         await asyncTest("an accepted reply is used, then dictionary and style are applied") {
@@ -108,6 +109,7 @@ func pipelineTests() async {
             expectTrue(result.llmAttempted)
             expectFalse(result.llmUsed)
             expectEqual(result.fallback, .inventedWords)
+            expectEqual(result.rejectedReply, "The capital of France is Paris.")
         }
 
         await asyncTest("a timeout falls back to the rules output") {

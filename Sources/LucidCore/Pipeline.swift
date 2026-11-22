@@ -33,6 +33,8 @@ public struct PipelineResult: Codable, Equatable, Sendable {
     /// True when the model's reply passed the guardrails and was used.
     public var llmUsed: Bool
     public var fallback: FallbackReason?
+    /// The model's reply, kept only when the guardrails rejected it, so the reason can be seen.
+    public var rejectedReply: String?
     /// Time spent in cleanup, in milliseconds. Transcription is not included.
     public var cleanMillis: Int
 }
@@ -80,6 +82,7 @@ public struct Pipeline: Sendable {
         var attempted = false
         var used = false
         var fallback: FallbackReason?
+        var rejectedReply: String?
 
         if let cleaner, Pipeline.needsLLM(body, level: context.level) {
             attempted = true
@@ -102,6 +105,7 @@ public struct Pipeline: Sendable {
                     used = true
                 case .rejected(let reason):
                     fallback = reason
+                    rejectedReply = reply
                 }
             } catch CleanerError.timeout {
                 fallback = .timeout
@@ -121,6 +125,7 @@ public struct Pipeline: Sendable {
             llmAttempted: attempted,
             llmUsed: used,
             fallback: fallback,
+            rejectedReply: rejectedReply,
             cleanMillis: Int(Date().timeIntervalSince(started) * 1000)
         )
     }

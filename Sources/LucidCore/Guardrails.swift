@@ -2,7 +2,7 @@ import Foundation
 
 /// Why the model's output was not used.
 public enum FallbackReason: String, Codable, Equatable, Sendable {
-    case empty, grew, inventedWords, overDeleted, timeout, engineError
+    case empty, grew, inventedWords, overDeleted, droppedWords, timeout, engineError
 }
 
 /// Thresholds for the guardrails. The defaults are tuned against the cleanup test set.
@@ -61,7 +61,87 @@ public enum Guardrails {
            Double(outputWords.count) < config.minKeptLight * Double(inputWords.count) {
             return .rejected(.overDeleted)
         }
+        if level == .light, droppedContent(input: inputWords, output: outputWords) {
+            return .rejected(.droppedWords)
+        }
         return .accepted(text)
+    }
+
+    // MARK: Dropped content
+
+    /// Above this many table cells the comparison is skipped. It covers a ten-minute dictation.
+    private static let maxComparisonCells = 6_000_000
+
+    /// Words whose removal says nothing: fillers, function words, and the number words that
+    /// disappear when "one thousand two hundred" becomes "1,200".
+    private static let ignorable: Set<String> = [
+        "a", "an", "the", "and", "or", "but", "so", "then", "also", "well", "okay", "ok", "right",
+        "yeah", "yes", "no", "not", "i", "you", "he", "she", "it", "we", "they", "me", "him", "her",
+        "us", "them", "my", "your", "his", "its", "our", "their", "this", "that", "these", "those",
+        "is", "are", "was", "were", "be", "been", "being", "am", "do", "does", "did", "have", "has",
+        "had", "will", "would", "can", "could", "should", "shall", "may", "might", "must", "to",
+        "of", "in", "on", "at", "for", "with", "from", "by", "about", "into", "over", "under", "as",
+        "if", "because", "when", "while", "than", "before", "after", "um", "uh", "er", "erm", "hmm",
+        "like", "know", "mean", "basically", "actually", "literally", "just", "kind", "sort",
+        "really", "very", "quite", "there", "here", "what", "which", "who", "whom", "whose",
+        "where", "why", "how", "thousand", "hundred", "million", "billion", "point", "dollars",
+        "dollar", "percent", "cents", "pounds", "euros", "dot", "gonna", "wanna", "gotta", "kinda",
+        "sorta", "pm",
+    ]
+
+    /// Words a speaker uses to take something back.
+    private static let correctionMarkers: Set<String> = [
+        "actually", "no", "wait", "scratch", "sorry", "meant", "mean", "rather", "instead",
+        "correction", "oops", "nevermind", "never",
+    ]
+
+    private static func isContent(_ word: String) -> Bool {
+        !ignorable.contains(word) && !word.allSatisfy(\.isNumber)
+    }
+
+    /// True when the output leaves out a stretch of the input that carried meaning, and nothing
+    /// the speaker said explains its removal. This is how a model loses "Translate this into
+    /// Spanish:" from the front of a dictated instruction.
+    static func droppedContent(input: [String], output: [String]) -> Bool {
+        guard input.count * output.count <= maxComparisonCells else { return false }
+        let matched = WordComparison.matchedFlags(input, output)
+        var start = 0
+        while start < input.count {
+            if matched[start] {
+                start += 1
+                continue
+            }
+            var end = start
+            while end < input.count, !matched[end] { end += 1 }
+            if isUnexplained(start..<end, in: input, outputWords: Set(output)) { return true }
+            start = end
+        }
+        return false
+    }
+
+    private static func isUnexplained(_ run: Range<Int>, in input: [String], outputWords: Set<String>) -> Bool {
+        let removed = Array(input[run])
+        // Two words the model wrote as one, such as "git hub" as "GitHub", were kept, not dropped.
+        var joined = Set<Int>()
+        for index in removed.indices.dropLast() where outputWords.contains(removed[index] + removed[index + 1]) {
+            joined.insert(index)
+            joined.insert(index + 1)
+        }
+        let content = removed.indices.filter { !joined.contains($0) }.map { removed[$0] }.filter(isContent)
+        guard content.count >= 2 else { return false }
+
+        // A correction explains it: the speaker took those words back.
+        let justAfter = input[run.upperBound..<min(input.count, run.upperBound + 2)]
+        if removed.contains(where: correctionMarkers.contains) || justAfter.contains(where: correctionMarkers.contains) {
+            return false
+        }
+
+        // So does a restart: the same words were said again next to the removed ones.
+        let reach = run.count + 4
+        let before = input[max(0, run.lowerBound - reach)..<run.lowerBound]
+        let after = input[run.upperBound..<min(input.count, run.upperBound + reach)]
+        let nearby = Set(before).union(after)
+        return !content.allSatisfy(nearby.contains)
     }
 
     private static let thinking = TextUtil.regex(#"<think>[\s\S]*?</think>"#)
@@ -73,7 +153,7 @@ public enum Guardrails {
 
     /// Removes the wrappers models tend to add: reasoning blocks, code fences, echoed
     /// delimiters, "Here is the cleaned text:" labels and enclosing quotation marks.
-    /// A label is kept when `input` starts with the same words, because then the speaker said it.
+    /// A label is kept when most of its words open `input`, because then the speaker said it.
     public static func unwrap(_ output: String, input: String = "") -> String {
         var text = TextUtil.replace(thinking, in: output, with: "")
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -82,10 +162,12 @@ public enum Guardrails {
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
         if let match = label.firstMatch(in: text, range: TextUtil.fullRange(text)) {
-            let found = (text as NSString).substring(with: match.range)
-            let labelStart = Array(WordComparison.words(found).prefix(2))
-            let inputStart = Array(WordComparison.words(input).prefix(2))
-            if labelStart != inputStart {
+            let labelWords = WordComparison.words((text as NSString).substring(with: match.range))
+            // The speaker's own opening, such as "Okay, here is the plan:", looks like a label too.
+            // It is theirs when at least half of its words are among the first words they said.
+            let opening = Set(WordComparison.words(input).prefix(labelWords.count + 4))
+            let spoken = labelWords.filter(opening.contains).count
+            if spoken * 2 < labelWords.count {
                 text = (text as NSString).replacingCharacters(in: match.range, with: "")
             }
         }
