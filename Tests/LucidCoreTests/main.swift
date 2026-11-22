@@ -7,5 +7,6 @@ rulesCleanerTests()
 guardrailsTests()
 dictionaryTests()
 styleRulesTests()
+promptBuilderTests()
 
 TestRun.shared.finish()
