@@ -21,5 +21,7 @@ if let index = launchArguments.firstIndex(of: "--render-ui"), index + 1 < launch
 }
 
 let application = NSApplication.shared
+let appDelegate = MainActor.assumeIsolated { AppDelegate() }
+application.delegate = appDelegate
 application.setActivationPolicy(.accessory)
 application.run()
