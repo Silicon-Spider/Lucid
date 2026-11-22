@@ -151,6 +151,43 @@ func pipelineTests() async {
             expectEqual(result.finalText, "\n\nSo this is the next section of the document.")
         }
 
+        await asyncTest("spoken line breaks inside a dictation survive the model") {
+            let log = RequestLog()
+            // A model that flattens whatever it is given onto one line.
+            let pipeline = Pipeline(cleaner: FakeCleaner { request in
+                log.add(request)
+                return request.transcript.replacingOccurrences(of: "\n", with: " ")
+            })
+            let result = await pipeline.process(
+                "Milk and eggs for the weekend please. New line. Then bread and butter for Monday morning. "
+                    + "New paragraph. And finally call the plumber about the tap."
+            )
+            expectEqual(
+                result.finalText,
+                "Milk and eggs for the weekend please.\nThen bread and butter for Monday morning.\n\n"
+                    + "And finally call the plumber about the tap."
+            )
+            expectEqual(log.all.map(\.transcript), [
+                "Milk and eggs for the weekend please.",
+                "Then bread and butter for Monday morning.",
+                "And finally call the plumber about the tap.",
+            ])
+            expectTrue(result.llmUsed)
+        }
+
+        await asyncTest("only the first part of a dictation continues a sentence") {
+            let log = RequestLog()
+            let pipeline = Pipeline(cleaner: FakeCleaner { request in
+                log.add(request)
+                return request.transcript
+            })
+            _ = await pipeline.process(
+                "And then we can review the whole thing. New line. The second line starts afresh here.",
+                context: PipelineContext(midSentence: true)
+            )
+            expectEqual(log.all.map(\.midSentence), [true, false])
+        }
+
         await asyncTest("an empty transcript gives empty text") {
             let pipeline = Pipeline(cleaner: FakeCleaner { _ in "something" })
             let result = await pipeline.process("[BLANK_AUDIO]")

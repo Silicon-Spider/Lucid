@@ -92,48 +92,36 @@ public struct Pipeline: Sendable {
         let started = Date()
         let rulesText = RulesCleaner.clean(transcript, level: context.level)
 
-        // Line breaks at the edges come from spoken commands. Models tend to drop them,
-        // so they are set aside here and put back at the end.
-        let leading = String(rulesText.prefix(while: { $0 == "\n" }))
-        let trailing = String(rulesText.reversed().prefix(while: { $0 == "\n" }))
-        let body = rulesText.trimmingCharacters(in: .newlines)
-
-        var text = body
+        // Spoken "new line" and "new paragraph" commands split the text into parts. Models
+        // tend to drop line breaks, so each part is cleaned by itself and the breaks the
+        // speaker asked for are put back exactly where they were.
+        var joined = ""
         var attempted = false
         var used = false
         var fallback: FallbackReason?
         var rejectedReply: String?
+        var isFirstPart = true
 
-        if let cleaner, Pipeline.needsLLM(body, level: context.level) {
-            attempted = true
-            let request = CleanupRequest(
-                transcript: body,
-                level: context.level,
-                category: context.category,
-                terms: context.dictionary.terms,
-                midSentence: context.midSentence
-            )
-            let wordCount = WordComparison.words(body).count
-            do {
-                let reply = try await cleaner.clean(
-                    request,
-                    timeout: Guardrails.timeout(forWordCount: wordCount, config: config)
-                )
-                switch Guardrails.check(input: body, output: reply, level: context.level, config: config) {
-                case .accepted(let cleaned):
-                    text = cleaned
-                    used = true
-                case .rejected(let reason):
-                    fallback = reason
-                    rejectedReply = reply
-                }
-            } catch CleanerError.timeout {
-                fallback = .timeout
-            } catch {
-                fallback = .engineError
+        for piece in Self.pieces(of: rulesText) {
+            switch piece {
+            case .breaks(let breaks):
+                joined += breaks
+            case .text(let part):
+                // Only the first part can be carrying on a sentence that is already there.
+                let outcome = await clean(part, context: context, midSentence: context.midSentence && isFirstPart)
+                isFirstPart = false
+                joined += outcome.text
+                attempted = attempted || outcome.attempted
+                used = used || outcome.used
+                fallback = fallback ?? outcome.fallback
+                rejectedReply = rejectedReply ?? outcome.rejectedReply
             }
         }
 
+        // The dictionary and style rules look at the text without its edge line breaks.
+        let leading = String(joined.prefix(while: { $0 == "\n" }))
+        let trailing = String(joined.reversed().prefix(while: { $0 == "\n" }))
+        var text = joined.trimmingCharacters(in: .newlines)
         text = context.dictionary.apply(to: text)
         text = StyleRules.apply(text, category: context.category)
         if context.midSentence { text = StyleRules.continuingSentence(text) }
@@ -148,5 +136,79 @@ public struct Pipeline: Sendable {
             rejectedReply: rejectedReply,
             cleanMillis: Int(Date().timeIntervalSince(started) * 1000)
         )
+    }
+
+    /// A stretch of text, or the line breaks between two stretches.
+    private enum Piece {
+        case text(String)
+        case breaks(String)
+    }
+
+    private static func pieces(of text: String) -> [Piece] {
+        var pieces: [Piece] = []
+        var words = ""
+        var breaks = ""
+        for character in text {
+            if character == "\n" {
+                if !words.isEmpty {
+                    pieces.append(.text(words))
+                    words = ""
+                }
+                breaks.append(character)
+            } else {
+                if !breaks.isEmpty {
+                    pieces.append(.breaks(breaks))
+                    breaks = ""
+                }
+                words.append(character)
+            }
+        }
+        if !words.isEmpty { pieces.append(.text(words)) }
+        if !breaks.isEmpty { pieces.append(.breaks(breaks)) }
+        return pieces
+    }
+
+    private struct PartOutcome {
+        var text: String
+        var attempted = false
+        var used = false
+        var fallback: FallbackReason?
+        var rejectedReply: String?
+    }
+
+    /// Runs one part through the model and the guardrails. Falls back to the part as the
+    /// rules stage left it.
+    private func clean(_ part: String, context: PipelineContext, midSentence: Bool) async -> PartOutcome {
+        var outcome = PartOutcome(text: part)
+        guard let cleaner, Pipeline.needsLLM(part, level: context.level) else { return outcome }
+
+        outcome.attempted = true
+        let request = CleanupRequest(
+            transcript: part,
+            level: context.level,
+            category: context.category,
+            terms: context.dictionary.terms,
+            midSentence: midSentence
+        )
+        let wordCount = WordComparison.words(part).count
+        do {
+            let reply = try await cleaner.clean(
+                request,
+                timeout: Guardrails.timeout(forWordCount: wordCount, config: config)
+            )
+            switch Guardrails.check(input: part, output: reply, level: context.level, config: config) {
+            case .accepted(let cleaned):
+                outcome.text = cleaned
+                outcome.used = true
+            case .rejected(let reason):
+                outcome.fallback = reason
+                outcome.rejectedReply = reply
+            }
+        } catch CleanerError.timeout {
+            outcome.fallback = .timeout
+        } catch {
+            outcome.fallback = .engineError
+        }
+        return outcome
     }
 }

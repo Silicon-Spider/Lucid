@@ -135,6 +135,14 @@ Reading the failures led to four code changes and one loosened test case.
    hedge, not a clear correction, and leaving it is the conservative behaviour the spec
    asks for, so the case no longer forbids "two weeks".
 
+## After the benchmark
+
+One more defect was found after these measurements, while checking the README's claims.
+Saying "new line" in the middle of a dictation produced a line break in the rules stage,
+and S1-mini then joined the lines back together. The pipeline now cleans each part
+separately and puts the speaker's breaks back. A 52nd test case, `lineBreaks-1`, covers
+it. S1-mini passes it, so its score is now 51 of 52. The other models were not re-run.
+
 ## Known weaknesses
 
 - **Long dictations are slower than the target.** Speech time grows with length: clips
