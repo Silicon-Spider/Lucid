@@ -99,3 +99,37 @@ public struct PersonalDictionary: Codable, Equatable, Sendable {
         try encoder.encode(self).write(to: url, options: .atomic)
     }
 }
+
+// MARK: Editing
+
+extension PersonalDictionary {
+    /// Adds a word to spell exactly. Returns false when it is blank or already present.
+    @discardableResult
+    public mutating func addTerm(_ term: String) -> Bool {
+        let cleaned = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return false }
+        guard !terms.contains(where: { $0.lowercased() == cleaned.lowercased() }) else { return false }
+        terms.append(cleaned)
+        return true
+    }
+
+    public mutating func removeTerm(_ term: String) {
+        terms.removeAll { $0 == term }
+    }
+
+    /// Adds a "misheard → correct" pair. A pair for the same misheard phrase is replaced.
+    /// Returns false when either side is blank.
+    @discardableResult
+    public mutating func addReplacement(from: String, to: String) -> Bool {
+        let heard = from.trimmingCharacters(in: .whitespacesAndNewlines)
+        let correct = to.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !heard.isEmpty, !correct.isEmpty else { return false }
+        replacements.removeAll { $0.from.lowercased() == heard.lowercased() }
+        replacements.append(Replacement(from: heard, to: correct))
+        return true
+    }
+
+    public mutating func removeReplacement(from: String) {
+        replacements.removeAll { $0.from == from }
+    }
+}

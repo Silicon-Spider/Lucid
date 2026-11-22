@@ -19,5 +19,6 @@ clientTests()
 dictationMachineTests()
 insertionTests()
 historyTests()
+dictionaryEditingTests()
 
 TestRun.shared.finish()
