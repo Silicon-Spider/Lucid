@@ -201,7 +201,7 @@ The LLM result is rejected, and the rules output used instead, when any of these
 | Empty output | always |
 | Timeout | 2.5 s plus 40 ms per input word |
 | Grew | output has more than 1.2 × input words plus 5 |
-| Invented words | more than 15% of output words absent from the input (35% at Medium) |
+| Invented or reordered words | more than 15% of output words cannot be lined up, in order, with the input (35% at Medium). One word is always allowed. |
 | Over-deleted | output has under 30% of input words (Light only, not applied at Medium) |
 
 Known wrappers such as quotation marks, code fences and "Here is the cleaned text:" are
@@ -303,7 +303,8 @@ the conservative-editing tests, and the measured latency is reported rather than
 
 ## 12. Build steps
 
-Each step ends with a commit pushed to `main`.
+Each step ends with a commit pushed to `main`. Steps 2 and 3 are built in the opposite
+order: the cleanup core needs no downloads, so it goes first.
 
 1. This spec.
 2. Engines: setup script, model downloads, supervisor, HTTP clients, and the benchmark
