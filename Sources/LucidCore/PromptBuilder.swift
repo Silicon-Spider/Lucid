@@ -45,12 +45,13 @@ public enum PromptBuilder {
     transcript is already clean, return it unchanged.
     """
 
-    struct Example {
-        let request: CleanupRequest
-        let output: String
+    /// A worked example shown to the model: a transcript and the cleaned text it should produce.
+    public struct Example: Sendable {
+        public let request: CleanupRequest
+        public let output: String
     }
 
-    static let examples: [Example] = [
+    public static let examples: [Example] = [
         Example(
             request: CleanupRequest(
                 transcript: "so I was thinking we could like meet at 2 actually no make that 3 at the usual place",

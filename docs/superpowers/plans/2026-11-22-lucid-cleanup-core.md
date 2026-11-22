@@ -1511,7 +1511,7 @@ Stage 2 of the pipeline: the messages sent to the cleanup model, and the types t
   - `public static let PromptBuilder.systemPrompt: String`
   - `public static func PromptBuilder.messages(for request: CleanupRequest) -> [ChatMessage]`
   - `public static func PromptBuilder.maxOutputTokens(forWordCount count: Int) -> Int`
-  - Internal: `PromptBuilder.examples: [PromptBuilder.Example]`, each with `request: CleanupRequest` and `output: String`
+  - `public static let PromptBuilder.examples: [PromptBuilder.Example]`, each with `request: CleanupRequest` and `output: String`. Public so the tests need no `@testable import`, which fails in release builds.
 
 Design:
 
@@ -1527,7 +1527,7 @@ The wording of the system prompt and examples is a first version. Plan 2 tunes i
 **File:** `Tests/LucidCoreTests/PromptBuilderTests.swift`
 
 ```swift
-@testable import LucidCore
+import LucidCore
 
 func promptBuilderTests() {
     suite("PromptBuilder") {
@@ -1743,12 +1743,13 @@ public enum PromptBuilder {
     transcript is already clean, return it unchanged.
     """
 
-    struct Example {
-        let request: CleanupRequest
-        let output: String
+    /// A worked example shown to the model: a transcript and the cleaned text it should produce.
+    public struct Example: Sendable {
+        public let request: CleanupRequest
+        public let output: String
     }
 
-    static let examples: [Example] = [
+    public static let examples: [Example] = [
         Example(
             request: CleanupRequest(
                 transcript: "so I was thinking we could like meet at 2 actually no make that 3 at the usual place",

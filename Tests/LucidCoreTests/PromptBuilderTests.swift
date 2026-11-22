@@ -1,4 +1,4 @@
-@testable import LucidCore
+import LucidCore
 
 func promptBuilderTests() {
     suite("PromptBuilder") {

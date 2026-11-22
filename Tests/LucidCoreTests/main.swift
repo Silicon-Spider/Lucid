@@ -9,5 +9,6 @@ dictionaryTests()
 styleRulesTests()
 promptBuilderTests()
 audioTests()
+await pipelineTests()
 
 TestRun.shared.finish()
