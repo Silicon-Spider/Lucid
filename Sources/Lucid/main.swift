@@ -14,6 +14,12 @@ if let index = launchArguments.firstIndex(of: "--self-test") {
     dispatchMain()
 }
 
+// Headless mode: draw the app's views to PNG files.
+if let index = launchArguments.firstIndex(of: "--render-ui"), index + 1 < launchArguments.count {
+    let folder = URL(fileURLWithPath: launchArguments[index + 1])
+    exit(MainActor.assumeIsolated { UIRenderer.render(into: folder) })
+}
+
 let application = NSApplication.shared
 application.setActivationPolicy(.accessory)
 application.run()
