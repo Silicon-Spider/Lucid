@@ -6,9 +6,10 @@ let package = Package(
     platforms: [.macOS(.v14)],
     targets: [
         .target(name: "LucidCore"),
+        .target(name: "LucidEngines", dependencies: ["LucidCore"]),
         .executableTarget(
             name: "LucidCoreTests",
-            dependencies: ["LucidCore"],
+            dependencies: ["LucidCore", "LucidEngines"],
             path: "Tests/LucidCoreTests"
         ),
     ]

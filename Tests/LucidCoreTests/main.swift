@@ -14,5 +14,6 @@ promptStyleTests()
 await continuationTests()
 whisperWindowTests()
 evalCaseTests()
+await engineTests()
 
 TestRun.shared.finish()

@@ -106,3 +106,13 @@ func expectFalse(_ condition: Bool, _ message: String = "expected false", file: 
     TestRun.shared.check()
     if condition { TestRun.shared.fail(message, file: file, line: line) }
 }
+
+func expectThrows<T>(_ body: () throws -> T, file: String = #fileID, line: Int = #line) {
+    TestRun.shared.check()
+    do {
+        _ = try body()
+        TestRun.shared.fail("expected an error to be thrown", file: file, line: line)
+    } catch {
+        // An error is what the test wanted.
+    }
+}
