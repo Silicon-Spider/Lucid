@@ -18,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let settings = AppSettings()
     private let pill = PillController()
     private let history = HistoryStore(directory: EngineConfig.supportDirectory)
-    private lazy var engines = EngineManager(level: settings.level)
+    private lazy var engines = EngineManager(choices: settings.models, level: settings.level)
     private lazy var controller = DictationController(settings: settings, engines: engines, history: history, pill: pill)
     private lazy var hotkeys = HotkeyMonitor(hotkey: settings.hotkey)
 
@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let setup = SetupModel()
     private lazy var dictionaryModel = DictionaryModel()
     private lazy var historyModel = HistoryModel(store: history)
+    private lazy var modelLibrary = ModelLibraryModel()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let identifier = Bundle.main.bundleIdentifier,
@@ -63,6 +64,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         startHotkeysWhenAllowed()
 
         controller.onHistoryChange = { [weak self] in self?.historyModel.reload() }
+        modelLibrary.onChange = { [weak self] in
+            guard let self else { return }
+            self.applyModels(self.settings.models)
+        }
         setup.isListening = { [weak self] in self?.hotkeys.isRunning ?? false }
         windows.onClose = { [weak self] kind in
             if kind == .setup { self?.setup.stop() }
@@ -111,9 +116,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(.separator())
 
         let levels = CleanupLevel.allCases.map { level -> NSMenuItem in
-            let unavailable = level == .medium && !EngineManager.generalModelInstalled
+            let unavailable = level == .medium && !EngineManager.mediumAvailable(for: settings.models)
             let item = actionItem(
-                unavailable ? "Medium: needs the optional model (see README)" : level.title,
+                unavailable ? "Medium: needs a larger model (see Settings, Models)" : level.title,
                 #selector(chooseLevel(_:))
             )
             item.representedObject = level.rawValue
@@ -252,7 +257,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func applyLevel(_ level: CleanupLevel) {
-        Task { await engines.setLevel(level) }
+        Task { await engines.update(level: level) }
+    }
+
+    private func applyModels(_ choices: ModelChoices) {
+        Task { await engines.update(choices: choices) }
     }
 
     private func applyHotkey(_ choice: HotkeyChoice) {
@@ -263,14 +272,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // The dictionary may have been edited by hand since the window was last open.
         dictionaryModel = DictionaryModel()
         historyModel.reload()
+        // Models may have been added to the folder by hand, or by lucid-cli add-model.
+        modelLibrary.reload()
         windows.show(.settings) {
             AnyView(SettingsView(
                 settings: settings,
                 engines: engines,
+                models: modelLibrary,
                 dictionary: dictionaryModel,
                 history: historyModel,
                 onHotkey: { [weak self] choice in self?.applyHotkey(choice) },
                 onLevel: { [weak self] level in self?.applyLevel(level) },
+                onModels: { [weak self] choices in self?.applyModels(choices) },
                 onRetry: { [weak self] entry in
                     Task { await self?.controller.retry(entry) }
                 }

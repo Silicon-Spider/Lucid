@@ -113,9 +113,28 @@ enum UIRenderer {
             AnyView(view.frame(width: 560, height: 620))
         }
 
+        // Model files only need their first bytes for the library to recognise them.
+        let modelsFolder = folder.appendingPathComponent("models")
+        try? FileManager.default.createDirectory(at: modelsFolder, withIntermediateDirectories: true)
+        var whisper = Data("lmgg".utf8)
+        for value: UInt32 in [51866, 1500, 1280, 20, 32, 448, 1280, 20, 4, 128, 8] {
+            withUnsafeBytes(of: value.littleEndian) { whisper.append(contentsOf: $0) }
+        }
+        let gguf = Data("GGUF".utf8) + Data(repeating: 0, count: 64)
+        for name in [EngineConfig.defaultSpeechModel, "ggml-small.en.bin"] {
+            try? whisper.write(to: modelsFolder.appendingPathComponent(name))
+        }
+        for name in [EngineConfig.s1Mini.fileName, "Llama-3.2-3B-Instruct-Q4_K_M.gguf"] {
+            try? gguf.write(to: modelsFolder.appendingPathComponent(name))
+        }
+        let library = ModelLibraryModel(library: ModelLibrary(directory: modelsFolder))
+        let modelSettings = AppSettings(defaults: UserDefaults(suiteName: "lucid-render-\(UUID().uuidString)") ?? .standard)
+        modelSettings.models = ModelChoices(medium: "Llama-3.2-3B-Instruct-Q4_K_M.gguf")
+
         let engines = EngineManager.preview(.ready)
         return [
             ("settings-general", tab(GeneralTab(settings: settings, engines: engines, onHotkey: { _ in }, onLevel: { _ in }))),
+            ("settings-models", tab(ModelsTab(settings: modelSettings, engines: engines, library: library, onModels: { _ in }))),
             ("settings-dictionary", tab(DictionaryTab(model: DictionaryModel(url: dictionaryURL)))),
             ("settings-history", tab(HistoryTab(model: HistoryModel(store: store), onRetry: { _ in }))),
             ("settings-about", tab(AboutTab())),

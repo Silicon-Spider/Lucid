@@ -46,6 +46,9 @@ let usage = """
 lucid-cli: command-line access to Lucid's dictation pipeline
 
   lucid-cli doctor                      check that the engines and models are installed
+  lucid-cli models                      list the models in Lucid's models folder
+  lucid-cli add-model [--style s1|general] <file>
+                                        copy a speech (.bin) or cleanup (.gguf) model into it
   lucid-cli clean [options] <text>      clean up a transcript given as text
   lucid-cli transcribe <file.wav>...    speech to text only
   lucid-cli dictate [options] <file.wav>...
@@ -61,7 +64,9 @@ Options:
   --mid-sentence               the text continues an existing sentence
   --model s1|general|<file>    cleanup model: S1-mini by Superwhisper (default), the general
                                model, or a .gguf file name in the models folder
-  --style s1|general           prompt format for a model given by file name (default general)
+  --style s1|general           prompt format for a model given by file name (default: the
+                               format set for it in Lucid, otherwise general)
+  --speech-model <file>        speech model: a file name in the models folder
   --rules-only                 skip the cleanup model
   --json                       clean, dictate: print the full result as JSON
   --cases <file>               eval: the test set (default evals/cases.json)
@@ -93,23 +98,31 @@ func pipelineContext(_ arguments: Arguments) throws -> PipelineContext {
     return context
 }
 
+func promptStyle(_ arguments: Arguments) throws -> PromptStyle? {
+    guard let name = arguments.option("style") else { return nil }
+    guard let style = PromptStyle(rawValue: name) else {
+        throw CLIError("unknown style '\(name)'. Use s1 or general.")
+    }
+    return style
+}
+
 func engineConfig(_ arguments: Arguments) throws -> EngineConfig {
     let choice = arguments.option("model") ?? "s1"
+    let cleanup: CleanupModel
     switch choice {
     case "s1":
-        return .standard(cleanup: EngineConfig.s1Mini)
+        cleanup = EngineConfig.s1Mini
     case "general":
-        return .standard(cleanup: EngineConfig.general)
+        cleanup = EngineConfig.general
     default:
         guard choice.hasSuffix(".gguf") else {
             throw CLIError("unknown model '\(choice)'. Use s1, general or a .gguf file name.")
         }
-        let styleName = arguments.option("style") ?? "general"
-        guard let style = PromptStyle(rawValue: styleName) else {
-            throw CLIError("unknown style '\(styleName)'. Use s1 or general.")
-        }
-        return .standard(cleanup: CleanupModel(fileName: choice, style: style))
+        let style = try promptStyle(arguments) ?? ModelLibrary.standard.style(of: choice) ?? .general
+        cleanup = CleanupModel(fileName: choice, style: style)
     }
+    let speech = arguments.option("speech-model") ?? EngineConfig.defaultSpeechModel
+    return .standard(speech: speech, cleanup: cleanup)
 }
 
 func seconds(_ interval: TimeInterval) -> String {
@@ -146,6 +159,45 @@ func runDoctor(_ arguments: Arguments) throws -> Int32 {
     for item in missing { print("  - \(item)") }
     print("\nRun scripts/setup.sh to install what is missing.")
     return 1
+}
+
+func runModels() -> Int32 {
+    let library = ModelLibrary.standard
+    let models = library.models()
+    let formatter = ByteCountFormatter()
+    formatter.countStyle = .file
+    for kind in ModelKind.allCases {
+        print(kind == .speech ? "Speech models" : "Cleanup models")
+        let matching = models.filter { $0.kind == kind }
+        if matching.isEmpty { print("  none") }
+        for model in matching {
+            var notes = [formatter.string(fromByteCount: model.bytes)]
+            if model.isBuiltIn { notes.append("built in") }
+            if let style = model.style { notes.append("\(style.rawValue) prompt") }
+            print("  \(model.fileName)  (\(notes.joined(separator: ", ")))")
+        }
+        print("")
+    }
+    print("Folder: \(library.directory.path)")
+    return 0
+}
+
+func runAddModel(_ arguments: Arguments) throws -> Int32 {
+    guard arguments.positional.count == 1, let path = arguments.positional.first else {
+        throw CLIError("add-model needs one model file")
+    }
+    let added = try ModelLibrary.standard.add(from: URL(fileURLWithPath: path), style: try promptStyle(arguments))
+    let model = added.model
+    if model.kind == .speech {
+        print("Added \(model.fileName) as a speech model.")
+        print("Try it with: lucid-cli dictate --speech-model \(model.fileName) <file.wav>")
+    } else {
+        print("Added \(model.fileName) as a cleanup model, using the \(model.style?.rawValue ?? "general") prompt.")
+        print("Try it with: lucid-cli eval --model \(model.fileName)")
+    }
+    if let warning = added.warning { print("Note: \(warning)") }
+    print("Choose it for the app in Lucid's Settings, Models.")
+    return 0
 }
 
 func runClean(_ arguments: Arguments) async throws -> Int32 {
@@ -301,6 +353,8 @@ func run() async throws -> Int32 {
     }
     switch command {
     case "doctor": return try runDoctor(arguments)
+    case "models": return runModels()
+    case "add-model": return try runAddModel(arguments)
     case "clean": return try await runClean(arguments)
     case "transcribe": return try await runDictate(arguments, transcribeOnly: true)
     case "dictate": return try await runDictate(arguments, transcribeOnly: false)

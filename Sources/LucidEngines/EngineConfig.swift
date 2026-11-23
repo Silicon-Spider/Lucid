@@ -34,6 +34,11 @@ public struct EngineConfig: Equatable, Sendable {
             .appendingPathComponent("Lucid")
     }
 
+    /// `~/Library/Application Support/Lucid/models`, where the model files are kept.
+    public static var modelsDirectory: URL {
+        supportDirectory.appendingPathComponent("models")
+    }
+
     /// Looks in Homebrew's folder on Apple Silicon, then on Intel.
     static func findBinary(_ name: String) -> URL {
         let folders = ["/opt/homebrew/bin", "/usr/local/bin"]
@@ -44,19 +49,26 @@ public struct EngineConfig: Equatable, Sendable {
         return URL(fileURLWithPath: folders[0]).appendingPathComponent(name)
     }
 
-    public static func standard(cleanup: CleanupModel = s1Mini) -> EngineConfig {
+    /// The engines from Homebrew and the models in Lucid's models folder. `speech` is the file
+    /// name of the speech model.
+    public static func standard(speech: String = defaultSpeechModel, cleanup: CleanupModel = s1Mini) -> EngineConfig {
         let support = supportDirectory
         let logs = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Logs/Lucid")
         return EngineConfig(
             whisperServer: findBinary("whisper-server"),
             llamaServer: findBinary("llama-server"),
-            modelsDirectory: support.appendingPathComponent("models"),
+            modelsDirectory: modelsDirectory,
             logsDirectory: logs,
             supportDirectory: support,
-            speechModel: defaultSpeechModel,
+            speechModel: speech,
             cleanupModel: cleanup
         )
+    }
+
+    /// The engines and models for a plan made from the user's choices.
+    public static func standard(plan: ModelPlan, level: CleanupLevel) -> EngineConfig {
+        standard(speech: plan.speech, cleanup: plan.cleanup(for: level))
     }
 
     public var speechModelURL: URL { modelsDirectory.appendingPathComponent(speechModel) }
