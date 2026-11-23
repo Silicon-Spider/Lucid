@@ -75,7 +75,7 @@ Choose one from the menu or in Settings.
 |---|---|
 | Off | Inserts exactly what you said. |
 | Light (default) | Removes fillers, false starts and corrections. Fixes punctuation. Formats spoken lists. Keeps every other word. |
-| Medium | Also tightens wordy phrasing. Slower. Needs an extra 2.6 GB model: `scripts/setup.sh --with-general`. |
+| Medium | Also tightens wordy phrasing. Slower. Needs an extra 2.6 GB model, `scripts/setup.sh --with-general`, or [one of your own](#your-own-models). |
 
 Lucid also adapts to where you are typing. In chat apps a short message loses its closing
 full stop. In terminals, editors and AI chat apps it does not format lists.
@@ -86,6 +86,26 @@ In Settings, Dictionary:
 
 - **Words to spell exactly**: names, products and jargon, such as GitHub.
 - **Corrections**: when Lucid keeps mishearing something, say what to write instead.
+
+### Your own models
+
+Lucid comes with its own models, and you can add others. In Settings, Models:
+
+- **Add Speech Model…** takes a Whisper model for whisper.cpp, such as `ggml-small.en.bin`
+  from [huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp).
+  A smaller model is faster but mishears more.
+- **Add Cleanup Model…** takes an instruction-following model as a single `.gguf` file, the
+  kind llama.cpp runs.
+- Then choose the speech model, and the cleanup model for Light and for Medium. Medium needs
+  a model that takes Lucid's own prompt.
+
+Lucid checks each file before adding it, and keeps its own copy in its models folder. It
+refuses a file that is not a model, a vision add-on (`mmproj`), an adapter, or a model split
+into several files. Each cleanup model you add has a prompt format: Lucid's prompt, for any
+instruction model, or the S1-mini format, for another copy of S1-mini.
+
+A model you add goes through the same guardrails as Lucid's own. If its reply adds words,
+answers a question or drops part of what you said, the rules output is used instead.
 
 ### History
 
@@ -127,6 +147,10 @@ swift run lucid-cli doctor                         # are the engines and models 
 swift run lucid-cli clean "um, so, like, hello"    # clean up some text
 swift run lucid-cli dictate recording.wav          # audio to clean text, with timings
 swift run lucid-cli eval                           # run the cleanup test set
+swift run lucid-cli models                         # list the models Lucid has
+swift run lucid-cli add-model ggml-small.en.bin    # add a model of your own
+swift run lucid-cli dictate --speech-model ggml-small.en.bin recording.wav
+swift run lucid-cli eval --model my-model.gguf     # try a cleanup model on the test set
 ```
 
 Audio files must be 16 kHz mono 16-bit WAV.
@@ -147,7 +171,9 @@ Then by hand, with Lucid running:
 4. Tap the key twice, speak, then press it once. The text appears.
 5. Hold the key and say nothing. The pill says "Didn't catch that".
 6. Click the Desktop, then dictate. The pill says "Copied. Press ⌘V".
-7. Quit Lucid. `pgrep -f "whisper-server|llama-server"` prints nothing.
+7. In Settings, Models, add a speech model such as `ggml-base.en.bin` and choose it. The tab
+   says the engines are running with these models, and dictation still works.
+8. Quit Lucid. `pgrep -f "whisper-server|llama-server"` prints nothing.
 
 ## Troubleshooting
 
@@ -158,6 +184,7 @@ Then by hand, with Lucid running:
 | The menu says "Setup needed" | Run `scripts/setup.sh`, then quit and reopen Lucid. |
 | The first word is cut off | The microphone takes a moment to start. Pause briefly after pressing the key. |
 | Text goes to the clipboard instead of being typed | The focused control is not a text field, or it is a password field. Press ⌘V where you want it. |
+| A model you added does not start | Settings, Models says why. Choose Lucid's own model to go back. The engine logs say more. |
 | Something else | Engine logs are in `~/Library/Logs/Lucid/`. They never contain what you said. |
 
 ## Limits

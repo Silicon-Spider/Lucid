@@ -1,3 +1,4 @@
+import AppKit
 import AVFoundation
 import Foundation
 import LucidCore
@@ -85,6 +86,103 @@ final class HistoryModel: ObservableObject {
     func clear() {
         store.clear()
         reload()
+    }
+}
+
+/// The models folder as the settings window sees it.
+@MainActor
+final class ModelLibraryModel: ObservableObject {
+    /// What happened after the user added, removed or changed a model.
+    struct Notice: Equatable {
+        let text: String
+        let isProblem: Bool
+    }
+
+    @Published private(set) var installed: [InstalledModel] = []
+    /// The name of the file being copied in, while it is copied.
+    @Published private(set) var adding: String?
+    @Published private(set) var notice: Notice?
+
+    /// Called after a model is added, removed or changed, so the engines can follow.
+    var onChange: (() -> Void)?
+
+    let library: ModelLibrary
+
+    init(library: ModelLibrary = .standard) {
+        self.library = library
+        reload()
+    }
+
+    func reload() {
+        installed = library.models()
+    }
+
+    func models(_ kind: ModelKind) -> [InstalledModel] {
+        installed.filter { $0.kind == kind }
+    }
+
+    func plan(for choices: ModelChoices) -> ModelPlan {
+        ModelLibrary.plan(for: choices, installed: installed)
+    }
+
+    /// Checks a model file and copies it in. A large model on another disk takes a while to
+    /// copy, so it is done in the background.
+    func add(_ url: URL, as kind: ModelKind) {
+        guard adding == nil else { return }
+        adding = url.lastPathComponent
+        notice = nil
+        let library = library
+        Task {
+            let outcome = await Task.detached(priority: .userInitiated) { () -> Result<ModelLibrary.Added, Error> in
+                let scoped = url.startAccessingSecurityScopedResource()
+                defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+                return Result { try library.add(from: url, as: kind) }
+            }.value
+            adding = nil
+            switch outcome {
+            case .success(let added):
+                let place = kind == .speech ? "Speech recognition" : "Cleanup"
+                let text = "Added \(added.model.name). Choose it under \(place) to use it."
+                notice = Notice(text: [text, added.warning].compactMap { $0 }.joined(separator: " "), isProblem: false)
+                reload()
+                onChange?()
+            case .failure(let error):
+                notice = Notice(text: "\(error)", isProblem: true)
+            }
+        }
+    }
+
+    /// Deletes a model the user added. Returns false if it could not be removed.
+    @discardableResult
+    func remove(_ model: InstalledModel) -> Bool {
+        defer {
+            reload()
+            onChange?()
+        }
+        do {
+            try library.remove(model.fileName)
+            notice = Notice(text: "Removed \(model.name).", isProblem: false)
+            return true
+        } catch {
+            notice = Notice(text: "\(error)", isProblem: true)
+            return false
+        }
+    }
+
+    func setStyle(_ style: PromptStyle, for model: InstalledModel) {
+        do {
+            try library.setStyle(style, for: model.fileName)
+            notice = nil
+        } catch {
+            notice = Notice(text: "\(error)", isProblem: true)
+        }
+        reload()
+        onChange?()
+    }
+
+    func showInFinder() {
+        try? FileManager.default.createDirectory(at: library.directory, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(library.directory)
     }
 }
 

@@ -20,5 +20,6 @@ dictationMachineTests()
 insertionTests()
 historyTests()
 dictionaryEditingTests()
+modelLibraryTests()
 
 TestRun.shared.finish()

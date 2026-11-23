@@ -22,57 +22,70 @@ final class EngineManager: ObservableObject {
     }
 
     @Published private(set) var status: Status = .starting
+    /// The engines and model files in use.
+    private(set) var config: EngineConfig
 
     private let tracksProcesses: Bool
-    private var cleanupModel: CleanupModel
+    private let library: ModelLibrary
+    private var choices: ModelChoices
+    private var level: CleanupLevel
     private var supervisor: EngineSupervisor
 
     /// `tracksProcesses` is false for the self-test, so it never stops a running app's engines.
-    init(level: CleanupLevel, tracksProcesses: Bool = true) {
+    init(choices: ModelChoices, level: CleanupLevel, library: ModelLibrary = .standard, tracksProcesses: Bool = true) {
         self.tracksProcesses = tracksProcesses
-        cleanupModel = Self.model(for: level)
-        supervisor = EngineSupervisor(config: .standard(cleanup: cleanupModel), tracksProcesses: tracksProcesses)
+        self.library = library
+        self.choices = choices
+        self.level = level
+        config = .standard(plan: library.plan(for: choices), level: level)
+        supervisor = EngineSupervisor(config: config, tracksProcesses: tracksProcesses)
     }
 
     /// A manager frozen in one state, for drawing views without starting any engine.
     static func preview(_ status: Status) -> EngineManager {
-        let manager = EngineManager(level: .light, tracksProcesses: false)
+        let manager = EngineManager(choices: ModelChoices(), level: .light, tracksProcesses: false)
         manager.status = status
         return manager
     }
 
-    /// True when the optional general model, used for the Medium level, has been downloaded.
-    static var generalModelInstalled: Bool {
-        FileManager.default.fileExists(atPath: EngineConfig.standard(cleanup: EngineConfig.general).cleanupModelURL.path)
-    }
-
-    /// Medium needs the general model. Everything else uses S1-mini by Superwhisper.
-    static func model(for level: CleanupLevel) -> CleanupModel {
-        level == .medium && generalModelInstalled ? EngineConfig.general : EngineConfig.s1Mini
+    /// True when a model that can do the Medium level is installed: the optional general
+    /// model, or one the user added that uses Lucid's own prompt.
+    static func mediumAvailable(for choices: ModelChoices) -> Bool {
+        ModelLibrary.standard.plan(for: choices).medium != nil
     }
 
     func start() async {
+        let starting = supervisor
         status = .starting
-        let missing = EngineConfig.standard(cleanup: cleanupModel).missing()
+        let missing = config.missing()
         guard missing.isEmpty else {
             status = .setupNeeded(missing)
             return
         }
         do {
-            try await supervisor.start()
+            try await starting.start()
+            // The models may have changed while these engines loaded. Then the newer start reports.
+            guard starting === supervisor else { return }
             status = .ready
         } catch {
+            guard starting === supervisor else { return }
             status = .failed("\(error)")
         }
     }
 
-    /// Swaps the cleanup model if the new level needs a different one.
-    func setLevel(_ level: CleanupLevel) async {
-        let wanted = Self.model(for: level)
-        guard wanted != cleanupModel else { return }
-        cleanupModel = wanted
-        await supervisor.stop()
-        supervisor = EngineSupervisor(config: .standard(cleanup: wanted), tracksProcesses: tracksProcesses)
+    /// Restarts the engines if the level, the user's model choices or the models folder now
+    /// call for different model files. Does nothing when they would load the same files.
+    func update(choices newChoices: ModelChoices? = nil, level newLevel: CleanupLevel? = nil) async {
+        if let newChoices { choices = newChoices }
+        if let newLevel { level = newLevel }
+        let wanted = EngineConfig.standard(plan: library.plan(for: choices), level: level)
+        guard wanted != config else { return }
+        // Swap before waiting, so an update that arrives meanwhile sees the new engines.
+        config = wanted
+        let old = supervisor
+        supervisor = EngineSupervisor(config: wanted, tracksProcesses: tracksProcesses)
+        status = .starting
+        await old.stop()
         await start()
     }
 

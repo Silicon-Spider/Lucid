@@ -12,13 +12,14 @@ enum SelfTest {
             return 2
         }
         let settings = AppSettings()
-        let engines = EngineManager(level: settings.level, tracksProcesses: false)
+        let engines = EngineManager(choices: settings.models, level: settings.level, tracksProcesses: false)
         await engines.start()
         guard engines.status == .ready else {
             print("engines are not ready: \(engines.status)")
             return 1
         }
         print("engines ready. level: \(settings.level.rawValue). dictation key: \(settings.hotkey.title).")
+        print("speech model: \(engines.config.speechModel). cleanup model: \(engines.config.cleanupModel.fileName).")
 
         let dictionary = (try? PersonalDictionary.load(from: AppSettings.dictionaryURL)) ?? .empty
         let context = PipelineContext(level: settings.level, dictionary: dictionary)

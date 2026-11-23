@@ -1,21 +1,26 @@
 import LucidCore
 import LucidEngines
 import SwiftUI
+import UniformTypeIdentifiers
 
-/// The settings window: four tabs.
+/// The settings window: five tabs.
 struct SettingsView: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var engines: EngineManager
+    @ObservedObject var models: ModelLibraryModel
     @ObservedObject var dictionary: DictionaryModel
     @ObservedObject var history: HistoryModel
     let onHotkey: (HotkeyChoice) -> Void
     let onLevel: (CleanupLevel) -> Void
+    let onModels: (ModelChoices) -> Void
     let onRetry: (HistoryEntry) -> Void
 
     var body: some View {
         TabView {
             GeneralTab(settings: settings, engines: engines, onHotkey: onHotkey, onLevel: onLevel)
                 .tabItem { Label("General", systemImage: "gearshape") }
+            ModelsTab(settings: settings, engines: engines, library: models, onModels: onModels)
+                .tabItem { Label("Models", systemImage: "cpu") }
             DictionaryTab(model: dictionary)
                 .tabItem { Label("Dictionary", systemImage: "character.book.closed") }
             HistoryTab(model: history, onRetry: onRetry)
@@ -51,7 +56,7 @@ struct GeneralTab: View {
         Binding(
             get: { settings.level },
             set: { choice in
-                if choice == .medium, !EngineManager.generalModelInstalled {
+                if choice == .medium, !EngineManager.mediumAvailable(for: settings.models) {
                     mediumRefused = true
                     return
                 }
@@ -118,7 +123,7 @@ struct GeneralTab: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 if mediumRefused {
-                    Text("Medium needs an optional 2.6 GB model. In Terminal, run scripts/setup.sh --with-general, then choose Medium again.")
+                    Text("Medium needs a larger model. In Terminal, run scripts/setup.sh --with-general for the optional 2.6 GB one, or add your own in the Models tab. Then choose Medium again.")
                         .font(.callout)
                         .foregroundStyle(.orange)
                 }
@@ -144,6 +149,223 @@ struct GeneralTab: View {
             }
         }
         .formStyle(.grouped)
+    }
+}
+
+struct ModelsTab: View {
+    @ObservedObject var settings: AppSettings
+    @ObservedObject var engines: EngineManager
+    @ObservedObject var library: ModelLibraryModel
+    let onModels: (ModelChoices) -> Void
+
+    @State private var importing = false
+    @State private var importKind = ModelKind.speech
+    @State private var removing: InstalledModel?
+
+    private func choose(_ change: (inout ModelChoices) -> Void) {
+        var choices = settings.models
+        change(&choices)
+        guard choices != settings.models else { return }
+        settings.models = choices
+        onModels(choices)
+    }
+
+    /// A picker's selection: shows `current`, and saves a new choice with `save`.
+    private func selection(_ current: String, save: @escaping (inout ModelChoices, String) -> Void) -> Binding<String> {
+        Binding(
+            get: { current },
+            set: { name in choose { save(&$0, name) } }
+        )
+    }
+
+    private func startImport(_ kind: ModelKind) {
+        importKind = kind
+        importing = true
+    }
+
+    private func remove(_ model: InstalledModel) {
+        guard library.remove(model) else { return }
+        choose { $0.forget(model.fileName) }
+    }
+
+    /// What each model is used for, for its row in the list.
+    private func uses(of model: InstalledModel, in plan: ModelPlan) -> [String] {
+        var uses: [String] = []
+        if model.fileName == plan.light.fileName { uses.append("Light") }
+        if model.fileName == plan.medium?.fileName { uses.append("Medium") }
+        return uses
+    }
+
+    private var engineNote: String {
+        switch engines.status {
+        case .starting: return "Loading the models. A large model can take a minute."
+        case .ready: return "The engines are running with these models."
+        case .setupNeeded(let missing):
+            return "Setup is not finished. Missing: " + missing.joined(separator: "; ") + "."
+        case .failed(let reason):
+            return "The engines did not start with these models. Choose another model, or go back to Lucid's own. \(reason)"
+        }
+    }
+
+    private var engineFailed: Bool {
+        if case .failed = engines.status { return true }
+        return false
+    }
+
+    var body: some View {
+        let plan = library.plan(for: settings.models)
+        let speechModels = library.models(.speech)
+        let cleanupModels = library.models(.cleanup)
+        let mediumModels = cleanupModels.filter { $0.style == .general }
+
+        Form {
+            Section {
+                Picker("Model", selection: selection(plan.speech) { $0.speech = $1 }) {
+                    if !speechModels.contains(where: { $0.fileName == plan.speech }) {
+                        Text("Not installed").tag(plan.speech)
+                    }
+                    ForEach(speechModels) { model in
+                        Text(model.name).tag(model.fileName)
+                    }
+                }
+            } header: {
+                Text("Speech recognition")
+            } footer: {
+                Text("Whisper models for whisper.cpp, named like ggml-small.en.bin. Smaller models are faster but mishear more. Lucid listens for English.")
+            }
+
+            Section {
+                Picker("Light", selection: selection(plan.light.fileName) { $0.light = $1 }) {
+                    if !cleanupModels.contains(where: { $0.fileName == plan.light.fileName }) {
+                        Text("Not installed").tag(plan.light.fileName)
+                    }
+                    ForEach(cleanupModels) { model in
+                        Text(model.name).tag(model.fileName)
+                    }
+                }
+                Picker("Medium", selection: selection(plan.medium?.fileName ?? "") { $0.medium = $1 }) {
+                    if plan.medium == nil {
+                        Text("None installed").tag("")
+                    }
+                    ForEach(mediumModels) { model in
+                        Text(model.name).tag(model.fileName)
+                    }
+                }
+                .disabled(mediumModels.isEmpty)
+            } header: {
+                Text("Cleanup")
+            } footer: {
+                Text("Medium needs a model that uses Lucid's prompt. If a model adds words, answers a question or drops part of what you said, Lucid uses its rules instead, so a dictation is never lost.")
+            }
+
+            Section {
+                ForEach(library.installed) { model in
+                    ModelRow(
+                        model: model,
+                        inUse: model.kind == .speech && model.fileName == plan.speech,
+                        uses: uses(of: model, in: plan),
+                        onStyle: { style in library.setStyle(style, for: model) },
+                        onRemove: { removing = model }
+                    )
+                }
+                HStack {
+                    Button("Add Speech Model…") { startImport(.speech) }
+                        .disabled(library.adding != nil)
+                    Button("Add Cleanup Model…") { startImport(.cleanup) }
+                        .disabled(library.adding != nil)
+                    Spacer()
+                    Button("Show in Finder") { library.showInFinder() }
+                }
+                if let adding = library.adding {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Adding \(adding)…").foregroundStyle(.secondary)
+                    }
+                }
+                if let notice = library.notice {
+                    Text(notice.text)
+                        .font(.callout)
+                        .foregroundStyle(notice.isProblem ? Color.orange : Color.secondary)
+                }
+            } header: {
+                Text("Models on this Mac")
+            } footer: {
+                Text("Lucid keeps its own copy of each model you add, in its models folder. Speech models come from huggingface.co/ggerganov/whisper.cpp. A cleanup model must be a single .gguf file.")
+            }
+
+            Section {
+                Text(engineNote)
+                    .font(.callout)
+                    .foregroundStyle(engineFailed ? Color.orange : Color.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.data]) { result in
+            if case .success(let url) = result {
+                library.add(url, as: importKind)
+            }
+        }
+        .confirmationDialog(
+            "Remove \(removing?.name ?? "this model")?",
+            isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
+            presenting: removing
+        ) { model in
+            Button("Remove", role: .destructive) { remove(model) }
+            Button("Cancel", role: .cancel) {}
+        } message: { model in
+            Text("Lucid deletes its copy, \(model.fileName). A copy you keep elsewhere is not touched.")
+        }
+    }
+}
+
+/// One model in the list: its name, what it is, and for a model the user added, its prompt
+/// format and a remove button.
+private struct ModelRow: View {
+    let model: InstalledModel
+    /// For a speech model: whether it is the one in use.
+    let inUse: Bool
+    /// For a cleanup model: the levels it is used for.
+    let uses: [String]
+    let onStyle: (PromptStyle) -> Void
+    let onRemove: () -> Void
+
+    private var detail: String {
+        var parts = [
+            model.kind == .speech ? "Speech" : "Cleanup",
+            ByteCountFormatter.string(fromByteCount: model.bytes, countStyle: .file),
+        ]
+        if model.isBuiltIn { parts.append("built in") }
+        if inUse { parts.append("in use") }
+        if !uses.isEmpty { parts.append("used for " + uses.joined(separator: " and ")) }
+        return parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(model.name)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if !model.isBuiltIn {
+                if model.kind == .cleanup {
+                    Picker("Prompt", selection: Binding(get: { model.style ?? .general }, set: onStyle)) {
+                        Text("Lucid's prompt").tag(PromptStyle.general)
+                        Text("S1-mini format").tag(PromptStyle.s1)
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    .help("The input the model expects. S1-mini and other copies of it need the S1-mini format. Every other model takes Lucid's prompt.")
+                }
+                Button(role: .destructive, action: onRemove) {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("Remove \(model.name)")
+            }
+        }
     }
 }
 

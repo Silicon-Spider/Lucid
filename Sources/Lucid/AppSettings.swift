@@ -10,6 +10,7 @@ final class AppSettings: ObservableObject {
         static let level = "cleanupLevel"
         static let keepRecordings = "keepRecordings"
         static let onboardingDone = "onboardingDone"
+        static let models = "models"
     }
 
     private let defaults: UserDefaults
@@ -31,12 +32,19 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(onboardingDone, forKey: Key.onboardingDone) }
     }
 
+    /// The speech and cleanup models the user chose. Empty choices mean Lucid's own models.
+    @Published var models: ModelChoices {
+        didSet { defaults.set(try? JSONEncoder().encode(models), forKey: Key.models) }
+    }
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         hotkey = defaults.string(forKey: Key.hotkey).flatMap(HotkeyChoice.init(rawValue:)) ?? SystemInfo.defaultHotkey
         level = defaults.string(forKey: Key.level).flatMap(CleanupLevel.init(rawValue:)) ?? .light
         keepRecordings = defaults.object(forKey: Key.keepRecordings) as? Bool ?? true
         onboardingDone = defaults.bool(forKey: Key.onboardingDone)
+        models = defaults.data(forKey: Key.models).flatMap { try? JSONDecoder().decode(ModelChoices.self, from: $0) }
+            ?? ModelChoices()
     }
 
     /// Not tied to the main actor, so it can be a default argument anywhere.
