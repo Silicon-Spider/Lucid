@@ -98,18 +98,39 @@ final class ModelLibraryModel: ObservableObject {
         let isProblem: Bool
     }
 
+    /// A download in progress.
+    struct Download: Equatable {
+        let remote: RemoteModel
+        var received: Int64
+        var total: Int64?
+
+        /// From 0 to 1, or nil when the size is not known.
+        var fraction: Double? {
+            guard let total, total > 0 else { return nil }
+            return min(1, Double(received) / Double(total))
+        }
+    }
+
     @Published private(set) var installed: [InstalledModel] = []
     /// The name of the file being copied in, while it is copied.
     @Published private(set) var adding: String?
     @Published private(set) var notice: Notice?
+    /// Downloads in progress, by file name.
+    @Published private(set) var downloads: [String: Download] = [:]
 
     /// Called after a model is added, removed or changed, so the engines can follow.
     var onChange: (() -> Void)?
 
     let library: ModelLibrary
+    let hub: HuggingFace
+    /// Looking up a model on Hugging Face, for the "Download Another Model" sheet.
+    let search: HubSearchModel
+    private var downloadTasks: [String: Task<Void, Never>] = [:]
 
-    init(library: ModelLibrary = .standard) {
+    init(library: ModelLibrary = .standard, hub: HuggingFace = HuggingFace()) {
         self.library = library
+        self.hub = hub
+        search = HubSearchModel(hub: hub)
         reload()
     }
 
@@ -180,9 +201,119 @@ final class ModelLibraryModel: ObservableObject {
         onChange?()
     }
 
+    func isInstalled(_ fileName: String) -> Bool {
+        installed.contains { $0.fileName == fileName }
+    }
+
+    /// How much of a file an earlier download left behind.
+    func partialBytes(of fileName: String) -> Int64? {
+        library.partialBytes(of: fileName)
+    }
+
+    /// Downloads a model in the background. It carries on when the settings window closes.
+    func download(_ remote: RemoteModel) {
+        let name = remote.fileName
+        guard downloads[name] == nil, !isInstalled(name) else { return }
+        downloads[name] = Download(remote: remote, received: library.partialBytes(of: name) ?? 0, total: remote.bytes)
+        notice = nil
+        let library = library
+        let hub = hub
+        let report: @Sendable (Int64, Int64?) -> Void = { [weak self] received, total in
+            guard let model = self else { return }
+            Task { @MainActor in
+                // A late report must not bring back a download that has finished.
+                guard model.downloads[name] != nil else { return }
+                model.downloads[name] = Download(remote: remote, received: received, total: total)
+            }
+        }
+        downloadTasks[name] = Task { [weak self] in
+            let outcome: Result<ModelLibrary.Added, Error>
+            do {
+                outcome = .success(try await library.download(remote, from: hub, progress: report))
+            } catch {
+                outcome = .failure(error)
+            }
+            self?.finishDownload(name, outcome)
+        }
+    }
+
+    /// Downloads whichever of these files Lucid suggests, such as its own models during setup.
+    func downloadSuggested(_ fileNames: [String]) {
+        for name in fileNames {
+            if let suggestion = ModelCatalog.suggestion(for: name) { download(suggestion.remote) }
+        }
+    }
+
+    /// Stops a download. What has arrived is kept, and downloading again continues from there.
+    func cancelDownload(_ fileName: String) {
+        downloadTasks[fileName]?.cancel()
+    }
+
+    private func finishDownload(_ name: String, _ outcome: Result<ModelLibrary.Added, Error>) {
+        downloads[name] = nil
+        downloadTasks[name] = nil
+        switch outcome {
+        case .success(let added):
+            var text = "Downloaded \(added.model.name)."
+            if !added.model.isBuiltIn {
+                text += " Choose it under \(added.model.kind == .speech ? "Speech recognition" : "Cleanup") to use it."
+            }
+            notice = Notice(text: [text, added.warning].compactMap { $0 }.joined(separator: " "), isProblem: false)
+            reload()
+            onChange?()
+        case .failure(let error) where error is CancellationError:
+            notice = Notice(text: "Stopped downloading \(name). Downloading it again continues where it stopped.", isProblem: false)
+        case .failure(let error):
+            notice = Notice(text: "\(error)", isProblem: true)
+        }
+    }
+
     func showInFinder() {
         try? FileManager.default.createDirectory(at: library.directory, withIntermediateDirectories: true)
         NSWorkspace.shared.open(library.directory)
+    }
+}
+
+/// Looks up a model on Hugging Face and lists the files in it that Lucid can use.
+@MainActor
+final class HubSearchModel: ObservableObject {
+    enum State: Equatable {
+        case idle
+        case searching
+        case found(repo: String, files: [RemoteModel])
+        case failed(String)
+    }
+
+    @Published private(set) var state: State = .idle
+
+    let hub: HuggingFace
+    /// Counts lookups, so an answer to an older one is ignored.
+    private var latest = 0
+
+    init(hub: HuggingFace = HuggingFace()) {
+        self.hub = hub
+    }
+
+    /// `text` is a model name such as "ggerganov/whisper.cpp", or a link to a model or one of its files.
+    func lookUp(_ text: String) {
+        latest += 1
+        let lookup = latest
+        guard let reference = HuggingFace.parse(text) else {
+            state = .failed("That is not a model on Hugging Face. Type a name such as ggerganov/whisper.cpp, or paste a link.")
+            return
+        }
+        state = .searching
+        let hub = hub
+        Task { [weak self] in
+            let next: State
+            do {
+                next = .found(repo: reference.repo, files: try await hub.modelFiles(in: reference))
+            } catch {
+                next = .failed("\(error)")
+            }
+            guard let self, self.latest == lookup else { return }
+            self.state = next
+        }
     }
 }
 

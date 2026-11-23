@@ -183,7 +183,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if Permissions.microphone != .authorized { return "Lucid needs microphone access" }
         switch engines.status {
         case .starting: return "Starting the engines…"
-        case .setupNeeded: return "Setup needed: run scripts/setup.sh"
+        case .setupNeeded:
+            return engines.enginesMissing
+                ? "Setup needed: run scripts/setup.sh"
+                : "Setup needed: download the models in Setup Checklist"
         case .failed: return "The engines did not start"
         case .ready: return "Ready. Hold \(settings.hotkey.title) and speak."
         }
@@ -298,6 +301,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 setup: setup,
                 engines: engines,
                 settings: settings,
+                models: modelLibrary,
                 onUseRightOption: { [weak self] in
                     self?.settings.hotkey = .rightOption
                     self?.applyHotkey(.rightOption)

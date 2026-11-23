@@ -8,12 +8,12 @@ private func temporaryFolder() -> URL {
     return url
 }
 
-private func littleEndian<T: FixedWidthInteger>(_ value: T) -> Data {
+func littleEndian<T: FixedWidthInteger>(_ value: T) -> Data {
     withUnsafeBytes(of: value.littleEndian) { Data($0) }
 }
 
 /// The start of a whisper.cpp model file: the magic and the eleven header numbers.
-private func whisperHeader(mels: Int32 = 80) -> Data {
+func whisperHeader(mels: Int32 = 80) -> Data {
     var data = Data("lmgg".utf8)
     let header: [Int32] = [51866, 1500, 1280, 20, 32, 448, 1280, 20, 4, mels, 8]
     for value in header { data.append(littleEndian(value)) }
@@ -21,12 +21,12 @@ private func whisperHeader(mels: Int32 = 80) -> Data {
     return data
 }
 
-private func ggufString(_ text: String) -> Data {
+func ggufString(_ text: String) -> Data {
     littleEndian(UInt64(text.utf8.count)) + Data(text.utf8)
 }
 
-/// One GGUF metadata value. The numbers are GGUF's own type codes.
-private enum Value {
+/// One GGUF metadata value, for building test files. The numbers are GGUF's own type codes.
+enum GGUFValue {
     case string(String)
     case uint16(UInt16)
     case uint32(UInt32)
@@ -49,14 +49,14 @@ private enum Value {
 }
 
 /// The start of a GGUF file with the given metadata, like the one llama.cpp writes.
-private func gguf(version: UInt32 = 3, _ entries: [(String, Value)]) -> Data {
+func gguf(version: UInt32 = 3, _ entries: [(String, GGUFValue)]) -> Data {
     var data = Data("GGUF".utf8) + littleEndian(version) + littleEndian(UInt64(0)) + littleEndian(UInt64(entries.count))
     for (key, value) in entries { data += ggufString(key) + value.encoded }
     return data + Data(repeating: 0, count: 32)
 }
 
 /// A typical instruction model's metadata, with a long token list before the chat template.
-private func chatModel(architecture: String = "llama", extra: [(String, Value)] = []) -> Data {
+func chatModel(architecture: String = "llama", extra: [(String, GGUFValue)] = []) -> Data {
     gguf([
         ("general.architecture", .string(architecture)),
         ("general.name", .string("Test Model")),

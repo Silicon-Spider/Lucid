@@ -123,7 +123,7 @@ struct GeneralTab: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 if mediumRefused {
-                    Text("Medium needs a larger model. In Terminal, run scripts/setup.sh --with-general for the optional 2.6 GB one, or add your own in the Models tab. Then choose Medium again.")
+                    Text("Medium needs a larger model. Download Qwen 3.5 4B (2.6 GB) or add your own in the Models tab, then choose Medium again.")
                         .font(.callout)
                         .foregroundStyle(.orange)
                 }
@@ -161,6 +161,7 @@ struct ModelsTab: View {
     @State private var importing = false
     @State private var importKind = ModelKind.speech
     @State private var removing: InstalledModel?
+    @State private var browsing = false
 
     private func choose(_ change: (inout ModelChoices) -> Void) {
         var choices = settings.models
@@ -217,6 +218,10 @@ struct ModelsTab: View {
         let speechModels = library.models(.speech)
         let cleanupModels = library.models(.cleanup)
         let mediumModels = cleanupModels.filter { $0.style == .general }
+        // Downloads started from the sheet, for models Lucid does not suggest.
+        let otherDownloads = library.downloads.values
+            .filter { ModelCatalog.suggestion(for: $0.remote.fileName) == nil }
+            .sorted { $0.remote.fileName < $1.remote.fileName }
 
         Form {
             Section {
@@ -294,12 +299,39 @@ struct ModelsTab: View {
             }
 
             Section {
+                ForEach(ModelCatalog.suggested) { suggestion in
+                    DownloadRow(
+                        title: suggestion.name,
+                        detail: DownloadRow.size(suggestion.remote.bytes) + " · " + suggestion.summary,
+                        remote: suggestion.remote,
+                        library: library
+                    )
+                }
+                ForEach(otherDownloads, id: \.remote.id) { download in
+                    DownloadRow(
+                        title: download.remote.fileName,
+                        detail: "From \(download.remote.repo)",
+                        remote: download.remote,
+                        library: library
+                    )
+                }
+                Button("Download Another Model…") { browsing = true }
+            } header: {
+                Text("Download from Hugging Face")
+            } footer: {
+                Text("Downloads come straight from huggingface.co, and Lucid sends nothing else. A download that stops continues where it left off.")
+            }
+
+            Section {
                 Text(engineNote)
                     .font(.callout)
                     .foregroundStyle(engineFailed ? Color.orange : Color.secondary)
             }
         }
         .formStyle(.grouped)
+        .sheet(isPresented: $browsing) {
+            HubBrowser(library: library, search: library.search, onDone: { browsing = false })
+        }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.data]) { result in
             if case .success(let url) = result {
                 library.add(url, as: importKind)
@@ -364,6 +396,134 @@ private struct ModelRow: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Remove \(model.name)")
+            }
+        }
+    }
+}
+
+/// A model that can be downloaded: what it is, then a button, or its progress while it downloads.
+private struct DownloadRow: View {
+    let title: String
+    let detail: String
+    let remote: RemoteModel
+    @ObservedObject var library: ModelLibraryModel
+
+    static func size(_ bytes: Int64?) -> String {
+        guard let bytes else { return "Size unknown" }
+        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    private func progressText(_ download: ModelLibraryModel.Download) -> String {
+        guard let total = download.total else { return "\(Self.size(download.received)) so far" }
+        return "\(Self.size(download.received)) of \(Self.size(total))"
+    }
+
+    var body: some View {
+        let download = library.downloads[remote.fileName]
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let download {
+                    ProgressView(value: download.fraction)
+                    Text(progressText(download))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            if download != nil {
+                Button("Stop") { library.cancelDownload(remote.fileName) }
+            } else if library.isInstalled(remote.fileName) {
+                Text("Downloaded")
+                    .foregroundStyle(.secondary)
+            } else {
+                let title: String = library.partialBytes(of: remote.fileName) == nil ? "Download" : "Resume"
+                Button(title) { library.download(remote) }
+            }
+        }
+    }
+}
+
+/// A sheet for downloading any public model on Hugging Face: look it up by name or link, then
+/// download one of the files Lucid can use.
+struct HubBrowser: View {
+    @ObservedObject var library: ModelLibraryModel
+    @ObservedObject var search: HubSearchModel
+    let onDone: () -> Void
+    @State private var text = ""
+
+    private var blank: Bool {
+        text.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Download from Hugging Face")
+                .font(.title3.weight(.semibold))
+            Text("Type a model's name, such as ggerganov/whisper.cpp, or paste a link to it or to one of its files. Lucid lists the files it can use.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                TextField("Model", text: $text, prompt: Text("owner/name, or a link"))
+                    .labelsHidden()
+                    .onSubmit {
+                        if !blank { search.lookUp(text) }
+                    }
+                Button("Look Up") { search.lookUp(text) }
+                    .disabled(blank)
+            }
+            results
+                .frame(maxHeight: .infinity, alignment: .top)
+            if let notice = library.notice {
+                Text(notice.text)
+                    .font(.callout)
+                    .foregroundStyle(notice.isProblem ? Color.orange : Color.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack {
+                Text("Each model has its own licence, shown on its page.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Done", action: onDone)
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 540, height: 480)
+    }
+
+    @ViewBuilder
+    private var results: some View {
+        switch search.state {
+        case .idle:
+            EmptyView()
+        case .searching:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Looking up…").foregroundStyle(.secondary)
+            }
+        case .failed(let message):
+            Text(message)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        case .found(let repo, let files):
+            VStack(alignment: .leading, spacing: 8) {
+                List(files) { file in
+                    DownloadRow(
+                        title: file.path,
+                        detail: (file.kind == .speech ? "Speech" : "Cleanup") + " · " + DownloadRow.size(file.bytes),
+                        remote: file,
+                        library: library
+                    )
+                }
+                Link("Open \(repo) on Hugging Face", destination: library.hub.pageURL(repo: repo))
+                    .font(.callout)
             }
         }
     }

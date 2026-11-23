@@ -91,28 +91,6 @@ enum UIRenderer {
             wav: nil
         )
 
-        func setup(done: Bool) -> SetupModel {
-            let model = SetupModel()
-            model.microphone = done
-            model.accessibility = done
-            model.listening = done
-            model.fnConflict = !done
-            return model
-        }
-        func checklist(done: Bool) -> AnyView {
-            AnyView(SetupView(
-                setup: setup(done: done),
-                engines: EngineManager.preview(done ? .ready : .setupNeeded(["the cleanup model, expected at ~/Library/Application Support/Lucid/models/s1-mini-q4_k_m.gguf"])),
-                settings: settings,
-                onUseRightOption: {},
-                onRestart: {},
-                onDone: {}
-            ))
-        }
-        func tab(_ view: some View) -> AnyView {
-            AnyView(view.frame(width: 560, height: 620))
-        }
-
         // Model files only need their first bytes for the library to recognise them.
         let modelsFolder = folder.appendingPathComponent("models")
         try? FileManager.default.createDirectory(at: modelsFolder, withIntermediateDirectories: true)
@@ -131,10 +109,34 @@ enum UIRenderer {
         let modelSettings = AppSettings(defaults: UserDefaults(suiteName: "lucid-render-\(UUID().uuidString)") ?? .standard)
         modelSettings.models = ModelChoices(medium: "Llama-3.2-3B-Instruct-Q4_K_M.gguf")
 
+        func setup(done: Bool) -> SetupModel {
+            let model = SetupModel()
+            model.microphone = done
+            model.accessibility = done
+            model.listening = done
+            model.fnConflict = !done
+            return model
+        }
+        func checklist(done: Bool) -> AnyView {
+            AnyView(SetupView(
+                setup: setup(done: done),
+                engines: EngineManager.preview(done ? .ready : .setupNeeded(["the cleanup model, expected at ~/Library/Application Support/Lucid/models/s1-mini-q4_k_m.gguf"])),
+                settings: settings,
+                models: library,
+                onUseRightOption: {},
+                onRestart: {},
+                onDone: {}
+            ))
+        }
+        func tab(_ view: some View, height: CGFloat = 620) -> AnyView {
+            AnyView(view.frame(width: 560, height: height))
+        }
+
         let engines = EngineManager.preview(.ready)
         return [
             ("settings-general", tab(GeneralTab(settings: settings, engines: engines, onHotkey: { _ in }, onLevel: { _ in }))),
-            ("settings-models", tab(ModelsTab(settings: modelSettings, engines: engines, library: library, onModels: { _ in }))),
+            // Tall enough to show the download section below the list of models.
+            ("settings-models", tab(ModelsTab(settings: modelSettings, engines: engines, library: library, onModels: { _ in }), height: 1250)),
             ("settings-dictionary", tab(DictionaryTab(model: DictionaryModel(url: dictionaryURL)))),
             ("settings-history", tab(HistoryTab(model: HistoryModel(store: store), onRetry: { _ in }))),
             ("settings-about", tab(AboutTab())),

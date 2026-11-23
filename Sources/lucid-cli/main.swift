@@ -49,6 +49,8 @@ lucid-cli: command-line access to Lucid's dictation pipeline
   lucid-cli models                      list the models in Lucid's models folder
   lucid-cli add-model [--style s1|general] <file>
                                         copy a speech (.bin) or cleanup (.gguf) model into it
+  lucid-cli download [--style s1|general] <model or link> [file]
+                                        list a Hugging Face model's files, or download one
   lucid-cli clean [options] <text>      clean up a transcript given as text
   lucid-cli transcribe <file.wav>...    speech to text only
   lucid-cli dictate [options] <file.wav>...
@@ -198,6 +200,58 @@ func runAddModel(_ arguments: Arguments) throws -> Int32 {
     if let warning = added.warning { print("Note: \(warning)") }
     print("Choose it for the app in Lucid's Settings, Models.")
     return 0
+}
+
+func runDownload(_ arguments: Arguments) async throws -> Int32 {
+    guard let text = arguments.positional.first, arguments.positional.count <= 2 else {
+        throw CLIError("download needs a Hugging Face model, such as ggerganov/whisper.cpp, or a link to one")
+    }
+    guard var reference = HuggingFace.parse(text) else {
+        throw CLIError("'\(text)' is not a Hugging Face model name or link")
+    }
+    if arguments.positional.count == 2 { reference.path = arguments.positional[1] }
+    let formatter = ByteCountFormatter()
+    formatter.countStyle = .file
+    let size = { (bytes: Int64?) in bytes.map { formatter.string(fromByteCount: $0) } ?? "size unknown" }
+
+    let files = try await HuggingFace().modelFiles(in: reference)
+    guard reference.path != nil, let file = files.first else {
+        print("Model files in \(reference.repo):")
+        for file in files { print("  \(file.path)  (\(file.kind.rawValue), \(size(file.bytes)))") }
+        print("\nDownload one with: lucid-cli download \(reference.repo) <file>")
+        return 0
+    }
+
+    print("Downloading \(file.fileName) (\(size(file.bytes))) from \(reference.repo)")
+    let lastPercent = Counter()
+    let added = try await ModelLibrary.standard.download(file, style: try promptStyle(arguments)) { received, total in
+        guard let total, total > 0 else { return }
+        let percent = Int(received * 100 / total)
+        if lastPercent.advance(to: percent) {
+            FileHandle.standardError.write(Data("\r  \(percent)%".utf8))
+        }
+    }
+    FileHandle.standardError.write(Data("\n".utf8))
+    let model = added.model
+    print("Added \(model.fileName) as a \(model.kind == .speech ? "speech" : "cleanup") model.")
+    if let warning = added.warning { print("Note: \(warning)") }
+    print("Choose it for the app in Lucid's Settings, Models.")
+    return 0
+}
+
+/// The last percentage printed, shared with the download's progress callback.
+final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = -1
+
+    /// True when `percent` is new, so it is worth printing.
+    func advance(to percent: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard percent > value else { return false }
+        value = percent
+        return true
+    }
 }
 
 func runClean(_ arguments: Arguments) async throws -> Int32 {
@@ -355,6 +409,7 @@ func run() async throws -> Int32 {
     case "doctor": return try runDoctor(arguments)
     case "models": return runModels()
     case "add-model": return try runAddModel(arguments)
+    case "download": return try await runDownload(arguments)
     case "clean": return try await runClean(arguments)
     case "transcribe": return try await runDictate(arguments, transcribeOnly: true)
     case "dictate": return try await runDictate(arguments, transcribeOnly: false)

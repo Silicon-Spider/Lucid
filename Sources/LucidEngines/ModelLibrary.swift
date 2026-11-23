@@ -198,8 +198,112 @@ public struct ModelLibrary: Sendable {
     /// file is never taken for a model. On APFS, a copy within one disk is a clone that takes
     /// no extra space.
     public func add(from picked: URL, as kind: ModelKind? = nil, style: PromptStyle? = nil) throws -> Added {
-        let source = picked.resolvingSymlinksInPath()
         let name = picked.lastPathComponent
+        let checked = try check(picked.resolvingSymlinksInPath(), name: name, kind: kind)
+
+        let files = FileManager.default
+        let destination = directory.appendingPathComponent(name)
+        if files.fileExists(atPath: destination.path) { throw ModelError.alreadyInstalled(name) }
+        // Not the `.part` name downloads use, so a download of the same file is left alone.
+        let partial = directory.appendingPathComponent(name + ".copy.part")
+        do {
+            try files.createDirectory(at: directory, withIntermediateDirectories: true)
+            try? files.removeItem(at: partial)
+            try files.copyItem(at: picked.resolvingSymlinksInPath(), to: partial)
+            try files.moveItem(at: partial, to: destination)
+        } catch {
+            try? files.removeItem(at: partial)
+            throw ModelError.copyFailed(error.localizedDescription)
+        }
+        return installed(name, checked, style: style)
+    }
+
+    /// Downloads a model from Hugging Face, checks it as `add` does, and puts it in the models
+    /// folder. A download that stops early is kept as a `.part` file, and the next download of
+    /// the same file continues from it. `progress` gets the bytes so far and the full size.
+    public func download(
+        _ remote: RemoteModel,
+        from hub: HuggingFace = HuggingFace(),
+        style: PromptStyle? = nil,
+        progress: @escaping @Sendable (Int64, Int64?) -> Void = { _, _ in }
+    ) async throws -> Added {
+        let name = remote.fileName
+        guard Self.mayBeModel(name), !name.hasSuffix(".part") else { throw ModelError.notAModel }
+        let files = FileManager.default
+        let destination = directory.appendingPathComponent(name)
+        if files.fileExists(atPath: destination.path) { throw ModelError.alreadyInstalled(name) }
+        do {
+            try files.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            throw DownloadError.cannotSave
+        }
+        let partial = partialURL(for: name)
+        try checkSpace(for: remote, partial: partial)
+
+        let download = FileDownload(
+            url: hub.downloadURL(for: remote), partial: partial, expectedBytes: remote.bytes, progress: progress
+        )
+        do {
+            try await download.run()
+        } catch {
+            // Keep what arrived, to continue from next time, but not an empty file.
+            if partialBytes(of: name) == nil { try? files.removeItem(at: partial) }
+            if let failure = error as? DownloadError, case .http(let code) = failure {
+                if code == 401 || code == 403 { throw DownloadError.needsAccess(remote.repo) }
+                if code == 404 { throw DownloadError.fileNotFound(remote.path) }
+            }
+            throw error
+        }
+
+        // The whole file is here. Check it like one the user added, then put it in place.
+        do {
+            let checked = try check(partial, name: name, kind: remote.kind)
+            if files.fileExists(atPath: destination.path) { throw ModelError.alreadyInstalled(name) }
+            do {
+                try files.moveItem(at: partial, to: destination)
+            } catch {
+                throw ModelError.copyFailed(error.localizedDescription)
+            }
+            return installed(name, checked, style: style)
+        } catch {
+            try? files.removeItem(at: partial)
+            throw error
+        }
+    }
+
+    /// How much of a file an earlier download left behind, if any.
+    public func partialBytes(of fileName: String) -> Int64? {
+        let path = partialURL(for: fileName).path
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? NSNumber,
+              size.int64Value > 0 else { return nil }
+        return size.int64Value
+    }
+
+    private func partialURL(for fileName: String) -> URL {
+        directory.appendingPathComponent(fileName + ".part")
+    }
+
+    /// Refuses to start a download that cannot fit, leaving room for the system.
+    private func checkSpace(for remote: RemoteModel, partial: URL) throws {
+        #if os(macOS)
+        guard let size = remote.bytes,
+              let values = try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
+              let free = values.volumeAvailableCapacityForImportantUsage else { return }
+        let needed = size - (partialBytes(of: remote.fileName) ?? 0)
+        if needed + 200_000_000 > free { throw DownloadError.notEnoughSpace(needed: needed, free: free) }
+        #endif
+    }
+
+    /// The result of checking a model file before it is put in the models folder.
+    private struct Checked {
+        let format: ModelFormat
+        /// Set when the file is one of Lucid's own models.
+        let known: BuiltInModel?
+        let warning: String?
+    }
+
+    /// Checks that a file is a usable model of the right kind, to be called `name`.
+    private func check(_ source: URL, name: String, kind: ModelKind?) throws -> Checked {
         if name.hasSuffix(".part") { throw ModelError.damaged }
         guard Self.mayBeModel(name) else { throw ModelError.notAModel }
 
@@ -223,30 +327,22 @@ public struct ModelLibrary: Sendable {
                     + "If its replies are unusable, Lucid falls back to its rules."
             }
         }
+        return Checked(format: format, known: known, warning: warning)
+    }
 
-        let files = FileManager.default
+    /// Describes a model just put in the folder, and saves its prompt format.
+    private func installed(_ name: String, _ checked: Checked, style: PromptStyle?) -> Added {
         let destination = directory.appendingPathComponent(name)
-        if files.fileExists(atPath: destination.path) { throw ModelError.alreadyInstalled(name) }
-
-        let partial = directory.appendingPathComponent(name + ".part")
-        do {
-            try files.createDirectory(at: directory, withIntermediateDirectories: true)
-            try? files.removeItem(at: partial)
-            try files.copyItem(at: source, to: partial)
-            try files.moveItem(at: partial, to: destination)
-        } catch {
-            try? files.removeItem(at: partial)
-            throw ModelError.copyFailed(error.localizedDescription)
-        }
-
-        let bytes = ((try? files.attributesOfItem(atPath: destination.path))?[.size] as? NSNumber)?.int64Value ?? 0
-        if let known {
+        let bytes = ((try? FileManager.default.attributesOfItem(atPath: destination.path))?[.size] as? NSNumber)?
+            .int64Value ?? 0
+        if let known = checked.known {
             let model = InstalledModel(
                 fileName: name, kind: known.kind, name: known.name, style: known.style, isBuiltIn: true, bytes: bytes
             )
-            return Added(model: model, warning: warning)
+            return Added(model: model, warning: checked.warning)
         }
-        let chosenStyle = format.kind == .cleanup ? style ?? Self.suggestedStyle(name) : nil
+        let kind = checked.format.kind
+        let chosenStyle = kind == .cleanup ? style ?? Self.suggestedStyle(name) : nil
         if let chosenStyle {
             var saved = registry()
             saved.styles[name] = chosenStyle
@@ -254,13 +350,13 @@ public struct ModelLibrary: Sendable {
         }
         let model = InstalledModel(
             fileName: name,
-            kind: format.kind,
+            kind: kind,
             name: Self.displayName(name),
             style: chosenStyle,
             isBuiltIn: false,
             bytes: bytes
         )
-        return Added(model: model, warning: warning)
+        return Added(model: model, warning: checked.warning)
     }
 
     /// Sets the prompt format of a cleanup model the user added.

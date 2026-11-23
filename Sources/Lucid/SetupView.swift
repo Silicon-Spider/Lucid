@@ -8,6 +8,7 @@ struct SetupView: View {
     @ObservedObject var setup: SetupModel
     @ObservedObject var engines: EngineManager
     @ObservedObject var settings: AppSettings
+    @ObservedObject var models: ModelLibraryModel
     let onUseRightOption: () -> Void
     let onRestart: () -> Void
     let onDone: () -> Void
@@ -91,10 +92,42 @@ struct SetupView: View {
         return "So Lucid can see the dictation key and type the text for you. Switch Lucid on in the list."
     }
 
+    /// Missing model files that Lucid can download for itself.
+    private var downloadable: [String] {
+        engines.missingModelFiles.filter { ModelCatalog.suggestion(for: $0) != nil }
+    }
+
+    /// The downloads of missing models that are under way.
+    private var downloads: [ModelLibraryModel.Download] {
+        engines.missingModelFiles.compactMap { models.downloads[$0] }
+    }
+
+    private static func size(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    private var downloadSize: String {
+        Self.size(downloadable.compactMap { ModelCatalog.suggestion(for: $0)?.remote.bytes }.reduce(0, +))
+    }
+
+    private var downloadFraction: Double? {
+        let total = downloads.compactMap(\.total).reduce(0, +)
+        guard total > 0 else { return nil }
+        return min(1, Double(downloads.map(\.received).reduce(0, +)) / Double(total))
+    }
+
     private var enginesRow: some View {
         SetupRow(done: enginesReady, title: "Speech engines and models", detail: enginesDetail) {
             if case .starting = engines.status {
                 ProgressView().controlSize(.small)
+            } else if !downloads.isEmpty {
+                ProgressView(value: downloadFraction)
+                    .frame(width: 180)
+                Button("Stop") {
+                    for download in downloads { models.cancelDownload(download.remote.fileName) }
+                }
+            } else if !downloadable.isEmpty {
+                Button("Download Models (\(downloadSize))") { models.downloadSuggested(downloadable) }
             }
         }
     }
@@ -106,8 +139,20 @@ struct SetupView: View {
         case .starting:
             return "Starting. The first start can take a few seconds."
         case .setupNeeded(let missing):
-            return "In Terminal, from the Lucid folder, run:  scripts/setup.sh\nThen quit and reopen Lucid. Missing: "
-                + missing.joined(separator: "; ") + "."
+            var detail: String
+            if !downloads.isEmpty {
+                let received = downloads.map(\.received).reduce(0, +)
+                let total = downloads.compactMap(\.total).reduce(0, +)
+                detail = "Downloading the models from Hugging Face: \(Self.size(received)) of \(Self.size(total))."
+            } else if engines.enginesMissing {
+                detail = "In Terminal, from the Lucid folder, run:  scripts/setup.sh\nThen quit and reopen Lucid. Missing: "
+                    + missing.joined(separator: "; ") + "."
+            } else {
+                detail = "Lucid needs its speech and cleanup models, downloaded once from Hugging Face. Missing: "
+                    + missing.joined(separator: "; ") + "."
+            }
+            if let notice = models.notice, notice.isProblem { detail += "\n" + notice.text }
+            return detail
         case .failed(let reason):
             return "The engines did not start. \(reason)"
         }

@@ -21,5 +21,6 @@ insertionTests()
 historyTests()
 dictionaryEditingTests()
 modelLibraryTests()
+await downloadTests()
 
 TestRun.shared.finish()

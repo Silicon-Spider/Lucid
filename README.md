@@ -44,7 +44,8 @@ four things:
 2. **Accessibility.** Switch Lucid on in System Settings, Privacy & Security,
    Accessibility. Lucid needs this to see the dictation key and to type for you. If the
    checklist then offers Restart Lucid, press it.
-3. **Speech engines and models.** Ticked once `scripts/setup.sh` has run.
+3. **Speech engines and models.** Ticked once `scripts/setup.sh` has run. If only the models
+   are missing, the checklist can download them.
 4. **The dictation key.** On a MacBook this is Fn. macOS also uses Fn for its own
    shortcut, so set "Press 🌐 key to" to "Do Nothing" in Keyboard settings, or choose
    Right Option in the checklist.
@@ -75,7 +76,7 @@ Choose one from the menu or in Settings.
 |---|---|
 | Off | Inserts exactly what you said. |
 | Light (default) | Removes fillers, false starts and corrections. Fixes punctuation. Formats spoken lists. Keeps every other word. |
-| Medium | Also tightens wordy phrasing. Slower. Needs an extra 2.6 GB model, `scripts/setup.sh --with-general`, or [one of your own](#your-own-models). |
+| Medium | Also tightens wordy phrasing. Slower. Needs an extra 2.6 GB model: download Qwen 3.5 4B in Settings, Models, or use [one of your own](#your-own-models). |
 
 Lucid also adapts to where you are typing. In chat apps a short message loses its closing
 full stop. In terminals, editors and AI chat apps it does not format lists.
@@ -91,6 +92,10 @@ In Settings, Dictionary:
 
 Lucid comes with its own models, and you can add others. In Settings, Models:
 
+- **Download from Hugging Face** lists Lucid's own models and a few others worth trying,
+  each with a Download button. **Download Another Model…** takes the name of any public
+  model on Hugging Face, such as `ggerganov/whisper.cpp`, or a link to it, and lists the
+  files Lucid can use.
 - **Add Speech Model…** takes a Whisper model for whisper.cpp, such as `ggml-small.en.bin`
   from [huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp).
   A smaller model is faster but mishears more.
@@ -103,6 +108,11 @@ Lucid checks each file before adding it, and keeps its own copy in its models fo
 refuses a file that is not a model, a vision add-on (`mmproj`), an adapter, or a model split
 into several files. Each cleanup model you add has a prompt format: Lucid's prompt, for any
 instruction model, or the S1-mini format, for another copy of S1-mini.
+
+Downloads come straight from huggingface.co, and Lucid sends nothing else. It only
+downloads public models: for a gated one, accept its licence on huggingface.co, download
+the file in your browser, and add it. A download that stops continues where it left off,
+including one that `scripts/setup.sh` started.
 
 A model you add goes through the same guardrails as Lucid's own. If its reply adds words,
 answers a question or drops part of what you said, the rules output is used instead.
@@ -149,6 +159,8 @@ swift run lucid-cli dictate recording.wav          # audio to clean text, with t
 swift run lucid-cli eval                           # run the cleanup test set
 swift run lucid-cli models                         # list the models Lucid has
 swift run lucid-cli add-model ggml-small.en.bin    # add a model of your own
+swift run lucid-cli download ggerganov/whisper.cpp # list a Hugging Face model's files
+swift run lucid-cli download ggerganov/whisper.cpp ggml-base.en.bin
 swift run lucid-cli dictate --speech-model ggml-small.en.bin recording.wav
 swift run lucid-cli eval --model my-model.gguf     # try a cleanup model on the test set
 ```
@@ -171,8 +183,8 @@ Then by hand, with Lucid running:
 4. Tap the key twice, speak, then press it once. The text appears.
 5. Hold the key and say nothing. The pill says "Didn't catch that".
 6. Click the Desktop, then dictate. The pill says "Copied. Press ⌘V".
-7. In Settings, Models, add a speech model such as `ggml-base.en.bin` and choose it. The tab
-   says the engines are running with these models, and dictation still works.
+7. In Settings, Models, download Whisper base.en and choose it. The progress bar fills, the
+   tab says the engines are running with these models, and dictation still works.
 8. Quit Lucid. `pgrep -f "whisper-server|llama-server"` prints nothing.
 
 ## Troubleshooting
@@ -184,6 +196,7 @@ Then by hand, with Lucid running:
 | The menu says "Setup needed" | Run `scripts/setup.sh`, then quit and reopen Lucid. |
 | The first word is cut off | The microphone takes a moment to start. Pause briefly after pressing the key. |
 | Text goes to the clipboard instead of being typed | The focused control is not a text field, or it is a password field. Press ⌘V where you want it. |
+| A download stops or fails | Press Download again. It continues where it stopped. For a gated model, download it in your browser and add the file. |
 | A model you added does not start | Settings, Models says why. Choose Lucid's own model to go back. The engine logs say more. |
 | Something else | Engine logs are in `~/Library/Logs/Lucid/`. They never contain what you said. |
 
