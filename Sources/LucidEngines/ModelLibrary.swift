@@ -80,6 +80,43 @@ public struct ModelPlan: Equatable, Sendable {
     }
 }
 
+/// What deleting a model changes. Each use the model had says what takes its place.
+public struct RemovalEffects: Equatable, Sendable {
+    public enum Change: Equatable, Sendable {
+        /// Another installed model, by file name, takes over.
+        case switches(to: String)
+        /// No other installed model can.
+        case nothingLeft
+    }
+
+    public var speech: Change?
+    public var light: Change?
+    public var medium: Change?
+
+    public init(speech: Change? = nil, light: Change? = nil, medium: Change? = nil) {
+        self.speech = speech
+        self.light = light
+        self.medium = medium
+    }
+
+    /// True when the model was not in use.
+    public var isEmpty: Bool { speech == nil && light == nil && medium == nil }
+}
+
+/// What an unfinished download left in the models folder.
+public struct PartialDownload: Equatable, Identifiable, Sendable {
+    /// The name the model will have when it is complete.
+    public var fileName: String
+    public var bytes: Int64
+
+    public var id: String { fileName }
+
+    public init(fileName: String, bytes: Int64) {
+        self.fileName = fileName
+        self.bytes = bytes
+    }
+}
+
 /// A model that comes with Lucid.
 public struct BuiltInModel: Sendable {
     public let fileName: String
@@ -161,7 +198,8 @@ public struct ModelLibrary: Sendable {
     // MARK: Choosing
 
     /// The files the engines should load for the user's choices. A choice that names a model
-    /// that is not installed falls back to the built-in model, so dictation keeps working.
+    /// that is not installed falls back to the built-in model, and if that is gone too, to any
+    /// installed model of the same kind, so dictation keeps working.
     public func plan(for choices: ModelChoices) -> ModelPlan {
         Self.plan(for: choices, installed: models())
     }
@@ -171,14 +209,40 @@ public struct ModelLibrary: Sendable {
             guard let fileName else { return nil }
             return installed.first { $0.fileName == fileName && $0.kind == kind }
         }
-        let speech = find(choices.speech, .speech)?.fileName ?? EngineConfig.defaultSpeechModel
-        let light = find(choices.light, .cleanup)?.cleanupModel ?? EngineConfig.s1Mini
+        let speech = find(choices.speech, .speech)?.fileName
+            ?? find(EngineConfig.defaultSpeechModel, .speech)?.fileName
+            ?? installed.first { $0.kind == .speech }?.fileName
+            ?? EngineConfig.defaultSpeechModel
+        let light = find(choices.light, .cleanup)?.cleanupModel
+            ?? find(EngineConfig.s1Mini.fileName, .cleanup)?.cleanupModel
+            ?? installed.first { $0.kind == .cleanup }?.cleanupModel
+            ?? EngineConfig.s1Mini
         // Only Lucid's own prompt has a Medium setting. The S1-mini format cannot tighten wording.
         let medium = [choices.medium, EngineConfig.general.fileName]
             .compactMap { find($0, .cleanup) }
             .first { $0.style == .general }?
             .cleanupModel
         return ModelPlan(speech: speech, light: light, medium: medium)
+    }
+
+    /// What deleting a model would change, so the user can be told before they confirm.
+    public static func effectsOfRemoving(
+        _ fileName: String, choices: ModelChoices, installed: [InstalledModel]
+    ) -> RemovalEffects {
+        let before = plan(for: choices, installed: installed)
+        let rest = installed.filter { $0.fileName != fileName }
+        var remaining = choices
+        remaining.forget(fileName)
+        let after = plan(for: remaining, installed: rest)
+        func change(to next: String?) -> RemovalEffects.Change {
+            guard let next, rest.contains(where: { $0.fileName == next }) else { return .nothingLeft }
+            return .switches(to: next)
+        }
+        var effects = RemovalEffects()
+        if before.speech == fileName { effects.speech = change(to: after.speech) }
+        if before.light.fileName == fileName { effects.light = change(to: after.light.fileName) }
+        if before.medium?.fileName == fileName { effects.medium = change(to: after.medium?.fileName) }
+        return effects
     }
 
     // MARK: Changing
@@ -369,17 +433,17 @@ public struct ModelLibrary: Sendable {
         try save(saved)
     }
 
-    /// Deletes a model the user added. Built-in models are left alone.
-    public func remove(_ fileName: String) throws {
-        if let known = Self.builtIn.first(where: { $0.fileName == fileName }) {
-            throw ModelError.builtIn(known.name)
-        }
+    /// Deletes a model from the models folder, Lucid's own included, and returns the bytes freed.
+    /// A built-in model can be downloaded again in Settings or with `scripts/setup.sh`.
+    @discardableResult
+    public func remove(_ fileName: String) throws -> Int64 {
         let url = directory.appendingPathComponent(fileName)
         // A link is removed, never the file it points to. `fileExists` would follow the link,
         // so ask for the link's own attributes.
-        guard Self.mayBeModel(fileName), (try? FileManager.default.attributesOfItem(atPath: url.path)) != nil else {
+        guard Self.mayBeModel(fileName), let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
             throw ModelError.notFound(fileName)
         }
+        let bytes = (attributes[.size] as? NSNumber)?.int64Value ?? 0
         do {
             try FileManager.default.removeItem(at: url)
         } catch {
@@ -387,6 +451,31 @@ public struct ModelLibrary: Sendable {
         }
         var saved = registry()
         if saved.styles.removeValue(forKey: fileName) != nil { try? save(saved) }
+        return bytes
+    }
+
+    /// Downloads that stopped part way, with how much of each arrived.
+    public func partialDownloads() -> [PartialDownload] {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path) else { return [] }
+        return names
+            .filter { $0.hasSuffix(".part") && !$0.hasSuffix(".copy.part") }
+            .map { String($0.dropLast(".part".count)) }
+            .filter(Self.mayBeModel)
+            .compactMap { name in partialBytes(of: name).map { PartialDownload(fileName: name, bytes: $0) } }
+            .sorted { $0.fileName.localizedStandardCompare($1.fileName) == .orderedAscending }
+    }
+
+    /// Deletes what an unfinished download left behind.
+    public func discardPartial(of fileName: String) throws {
+        let url = partialURL(for: fileName)
+        guard Self.mayBeModel(fileName), FileManager.default.fileExists(atPath: url.path) else {
+            throw ModelError.notFound(fileName)
+        }
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            throw ModelError.removeFailed(error.localizedDescription)
+        }
     }
 
     // MARK: Helpers

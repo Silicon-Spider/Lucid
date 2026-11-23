@@ -105,6 +105,8 @@ enum UIRenderer {
         for name in [EngineConfig.s1Mini.fileName, "Llama-3.2-3B-Instruct-Q4_K_M.gguf"] {
             try? gguf.write(to: modelsFolder.appendingPathComponent(name))
         }
+        // An unfinished download, so the Resume and Discard buttons show.
+        try? Data(repeating: 0, count: 4096).write(to: modelsFolder.appendingPathComponent("ggml-base.en.bin.part"))
         let library = ModelLibraryModel(library: ModelLibrary(directory: modelsFolder))
         let modelSettings = AppSettings(defaults: UserDefaults(suiteName: "lucid-render-\(UUID().uuidString)") ?? .standard)
         modelSettings.models = ModelChoices(medium: "Llama-3.2-3B-Instruct-Q4_K_M.gguf")

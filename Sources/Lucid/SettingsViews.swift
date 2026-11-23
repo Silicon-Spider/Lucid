@@ -189,6 +189,18 @@ struct ModelsTab: View {
         choose { $0.forget(model.fileName) }
     }
 
+    /// The confirmation's explanation: what goes, how much space it frees, and what changes.
+    private func removalMessage(for model: InstalledModel) -> String {
+        var lines = ["This deletes \(model.fileName) from Lucid's models folder, freeing \(DownloadRow.size(model.bytes))."]
+        lines += library.effectsOfRemoving(model, choices: settings.models)
+        lines.append(
+            ModelCatalog.suggestion(for: model.fileName) != nil
+                ? "You can download it again here."
+                : "A copy you keep elsewhere is not touched."
+        )
+        return lines.joined(separator: " ")
+    }
+
     /// What each model is used for, for its row in the list.
     private func uses(of model: InstalledModel, in plan: ModelPlan) -> [String] {
         var uses: [String] = []
@@ -222,6 +234,10 @@ struct ModelsTab: View {
         let otherDownloads = library.downloads.values
             .filter { ModelCatalog.suggestion(for: $0.remote.fileName) == nil }
             .sorted { $0.remote.fileName < $1.remote.fileName }
+        // What stopped downloads from the sheet left behind. Suggested models show theirs in their own row.
+        let unfinished = library.partials.filter {
+            ModelCatalog.suggestion(for: $0.fileName) == nil && library.downloads[$0.fileName] == nil
+        }
 
         Form {
             Section {
@@ -295,7 +311,7 @@ struct ModelsTab: View {
             } header: {
                 Text("Models on this Mac")
             } footer: {
-                Text("Lucid keeps its own copy of each model you add, in its models folder. Speech models come from huggingface.co/ggerganov/whisper.cpp. A cleanup model must be a single .gguf file.")
+                Text("These models use \(DownloadRow.size(library.totalBytes)) of disk. Lucid keeps its own copy of each model you add, in its models folder. Speech models come from huggingface.co/ggerganov/whisper.cpp. A cleanup model must be a single .gguf file.")
             }
 
             Section {
@@ -304,7 +320,8 @@ struct ModelsTab: View {
                         title: suggestion.name,
                         detail: DownloadRow.size(suggestion.remote.bytes) + " · " + suggestion.summary,
                         remote: suggestion.remote,
-                        library: library
+                        library: library,
+                        onDelete: { model in removing = model }
                     )
                 }
                 ForEach(otherDownloads, id: \.remote.id) { download in
@@ -314,6 +331,19 @@ struct ModelsTab: View {
                         remote: download.remote,
                         library: library
                     )
+                }
+                ForEach(unfinished) { partial in
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(partial.fileName)
+                            Text("Unfinished: \(DownloadRow.size(partial.bytes)) so far. Look it up again to continue it.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Discard") { library.discardPartial(partial.fileName) }
+                            .help("Delete the part downloaded so far")
+                    }
                 }
                 Button("Download Another Model…") { browsing = true }
             } header: {
@@ -338,20 +368,20 @@ struct ModelsTab: View {
             }
         }
         .confirmationDialog(
-            "Remove \(removing?.name ?? "this model")?",
+            "Delete \(removing?.name ?? "this model")?",
             isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
             presenting: removing
         ) { model in
-            Button("Remove", role: .destructive) { remove(model) }
+            Button("Delete", role: .destructive) { remove(model) }
             Button("Cancel", role: .cancel) {}
         } message: { model in
-            Text("Lucid deletes its copy, \(model.fileName). A copy you keep elsewhere is not touched.")
+            Text(removalMessage(for: model))
         }
     }
 }
 
-/// One model in the list: its name, what it is, and for a model the user added, its prompt
-/// format and a remove button.
+/// One model in the list: its name, what it is, a delete button, and for a cleanup model the
+/// user added, its prompt format.
 private struct ModelRow: View {
     let model: InstalledModel
     /// For a speech model: whether it is the one in use.
@@ -381,22 +411,20 @@ private struct ModelRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
-            if !model.isBuiltIn {
-                if model.kind == .cleanup {
-                    Picker("Prompt", selection: Binding(get: { model.style ?? .general }, set: onStyle)) {
-                        Text("Lucid's prompt").tag(PromptStyle.general)
-                        Text("S1-mini format").tag(PromptStyle.s1)
-                    }
-                    .labelsHidden()
-                    .fixedSize()
-                    .help("The input the model expects. S1-mini and other copies of it need the S1-mini format. Every other model takes Lucid's prompt.")
+            if !model.isBuiltIn, model.kind == .cleanup {
+                Picker("Prompt", selection: Binding(get: { model.style ?? .general }, set: onStyle)) {
+                    Text("Lucid's prompt").tag(PromptStyle.general)
+                    Text("S1-mini format").tag(PromptStyle.s1)
                 }
-                Button(role: .destructive, action: onRemove) {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.borderless)
-                .help("Remove \(model.name)")
+                .labelsHidden()
+                .fixedSize()
+                .help("The input the model expects. S1-mini and other copies of it need the S1-mini format. Every other model takes Lucid's prompt.")
             }
+            Button(role: .destructive, action: onRemove) {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.borderless)
+            .help("Delete \(model.name)")
         }
     }
 }
@@ -407,6 +435,8 @@ private struct DownloadRow: View {
     let detail: String
     let remote: RemoteModel
     @ObservedObject var library: ModelLibraryModel
+    /// Asks to delete the model once it is downloaded. Without it, the row has no delete button.
+    var onDelete: ((InstalledModel) -> Void)? = nil
 
     static func size(_ bytes: Int64?) -> String {
         guard let bytes else { return "Size unknown" }
@@ -420,6 +450,8 @@ private struct DownloadRow: View {
 
     var body: some View {
         let download = library.downloads[remote.fileName]
+        let installed = library.installed.first { $0.fileName == remote.fileName }
+        let partial = library.partials.first { $0.fileName == remote.fileName }
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
@@ -432,17 +464,31 @@ private struct DownloadRow: View {
                     Text(progressText(download))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                } else if installed == nil, let partial {
+                    Text("Unfinished: \(Self.size(partial.bytes)) so far.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             Spacer()
             if download != nil {
                 Button("Stop") { library.cancelDownload(remote.fileName) }
-            } else if library.isInstalled(remote.fileName) {
+            } else if let installed {
                 Text("Downloaded")
                     .foregroundStyle(.secondary)
+                if let onDelete {
+                    Button(role: .destructive, action: { onDelete(installed) }) {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Delete \(installed.name)")
+                }
+            } else if partial != nil {
+                Button("Resume") { library.download(remote) }
+                Button("Discard") { library.discardPartial(remote.fileName) }
+                    .help("Delete the part downloaded so far")
             } else {
-                let title: String = library.partialBytes(of: remote.fileName) == nil ? "Download" : "Resume"
-                Button(title) { library.download(remote) }
+                Button("Download") { library.download(remote) }
             }
         }
     }

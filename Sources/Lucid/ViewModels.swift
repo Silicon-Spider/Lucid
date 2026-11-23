@@ -117,6 +117,8 @@ final class ModelLibraryModel: ObservableObject {
     @Published private(set) var notice: Notice?
     /// Downloads in progress, by file name.
     @Published private(set) var downloads: [String: Download] = [:]
+    /// Downloads that stopped part way, kept so they can continue.
+    @Published private(set) var partials: [PartialDownload] = []
 
     /// Called after a model is added, removed or changed, so the engines can follow.
     var onChange: (() -> Void)?
@@ -136,6 +138,44 @@ final class ModelLibraryModel: ObservableObject {
 
     func reload() {
         installed = library.models()
+        partials = library.partialDownloads()
+    }
+
+    /// The space all the models take up.
+    var totalBytes: Int64 {
+        installed.map(\.bytes).reduce(0, +)
+    }
+
+    private static func size(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
+    private func name(of fileName: String) -> String {
+        installed.first { $0.fileName == fileName }?.name ?? fileName
+    }
+
+    /// What deleting a model would change, in sentences for the confirmation. Empty when the
+    /// model is not in use.
+    func effectsOfRemoving(_ model: InstalledModel, choices: ModelChoices) -> [String] {
+        let effects = ModelLibrary.effectsOfRemoving(model.fileName, choices: choices, installed: installed)
+        let stops = "so dictation stops working until you download one again."
+        var lines: [String] = []
+        switch effects.speech {
+        case .switches(let next): lines.append("Lucid will use \(name(of: next)) for speech instead.")
+        case .nothingLeft: lines.append("Lucid has no other speech model, " + stops)
+        case nil: break
+        }
+        switch effects.light {
+        case .switches(let next): lines.append("Light will use \(name(of: next)) instead.")
+        case .nothingLeft: lines.append("Lucid has no other cleanup model, " + stops)
+        case nil: break
+        }
+        switch effects.medium {
+        case .switches(let next): lines.append("Medium will use \(name(of: next)) instead.")
+        case .nothingLeft: lines.append("Medium will use the Light model until you download one that can tighten wording.")
+        case nil: break
+        }
+        return lines
     }
 
     func models(_ kind: ModelKind) -> [InstalledModel] {
@@ -173,7 +213,7 @@ final class ModelLibraryModel: ObservableObject {
         }
     }
 
-    /// Deletes a model the user added. Returns false if it could not be removed.
+    /// Deletes a model, Lucid's own included. Returns false if it could not be deleted.
     @discardableResult
     func remove(_ model: InstalledModel) -> Bool {
         defer {
@@ -181,13 +221,26 @@ final class ModelLibraryModel: ObservableObject {
             onChange?()
         }
         do {
-            try library.remove(model.fileName)
-            notice = Notice(text: "Removed \(model.name).", isProblem: false)
+            let freed = try library.remove(model.fileName)
+            notice = Notice(text: "Deleted \(model.name), freeing \(Self.size(freed)).", isProblem: false)
             return true
         } catch {
             notice = Notice(text: "\(error)", isProblem: true)
             return false
         }
+    }
+
+    /// Deletes what an unfinished download left behind. Not while it is downloading.
+    func discardPartial(_ fileName: String) {
+        guard downloads[fileName] == nil else { return }
+        let bytes = library.partialBytes(of: fileName) ?? 0
+        do {
+            try library.discardPartial(of: fileName)
+            notice = Notice(text: "Deleted the unfinished download of \(fileName), freeing \(Self.size(bytes)).", isProblem: false)
+        } catch {
+            notice = Notice(text: "\(error)", isProblem: true)
+        }
+        reload()
     }
 
     func setStyle(_ style: PromptStyle, for model: InstalledModel) {
@@ -263,8 +316,10 @@ final class ModelLibraryModel: ObservableObject {
             onChange?()
         case .failure(let error) where error is CancellationError:
             notice = Notice(text: "Stopped downloading \(name). Downloading it again continues where it stopped.", isProblem: false)
+            reload()
         case .failure(let error):
             notice = Notice(text: "\(error)", isProblem: true)
+            reload()
         }
     }
 

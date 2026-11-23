@@ -82,7 +82,7 @@ public enum ModelError: Error, Equatable, CustomStringConvertible {
         case .alreadyInstalled(let name):
             return "A model called \(name) is already in Lucid's models folder."
         case .builtIn(let name):
-            return "\(name) is one of Lucid's own models, so it cannot be removed here."
+            return "\(name) is one of Lucid's own models, and its prompt format is fixed."
         case .notFound(let name):
             return "\(name) is not in Lucid's models folder."
         case .copyFailed(let reason):

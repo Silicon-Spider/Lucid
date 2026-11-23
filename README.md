@@ -104,6 +104,10 @@ Lucid comes with its own models, and you can add others. In Settings, Models:
 - Then choose the speech model, and the cleanup model for Light and for Medium. Medium needs
   a model that takes Lucid's own prompt.
 
+To delete a model, Lucid's own included, press its trash button. If Lucid was using it, the
+confirmation says what takes its place, and an unfinished download can be discarded the
+same way.
+
 Lucid checks each file before adding it, and keeps its own copy in its models folder. It
 refuses a file that is not a model, a vision add-on (`mmproj`), an adapter, or a model split
 into several files. Each cleanup model you add has a prompt format: Lucid's prompt, for any
@@ -161,6 +165,7 @@ swift run lucid-cli models                         # list the models Lucid has
 swift run lucid-cli add-model ggml-small.en.bin    # add a model of your own
 swift run lucid-cli download ggerganov/whisper.cpp # list a Hugging Face model's files
 swift run lucid-cli download ggerganov/whisper.cpp ggml-base.en.bin
+swift run lucid-cli remove-model ggml-base.en.bin  # delete a model
 swift run lucid-cli dictate --speech-model ggml-small.en.bin recording.wav
 swift run lucid-cli eval --model my-model.gguf     # try a cleanup model on the test set
 ```

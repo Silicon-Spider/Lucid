@@ -51,6 +51,7 @@ lucid-cli: command-line access to Lucid's dictation pipeline
                                         copy a speech (.bin) or cleanup (.gguf) model into it
   lucid-cli download [--style s1|general] <model or link> [file]
                                         list a Hugging Face model's files, or download one
+  lucid-cli remove-model <file>         delete a model, or an unfinished download of one
   lucid-cli clean [options] <text>      clean up a transcript given as text
   lucid-cli transcribe <file.wav>...    speech to text only
   lucid-cli dictate [options] <file.wav>...
@@ -180,7 +181,33 @@ func runModels() -> Int32 {
         }
         print("")
     }
+    let partials = library.partialDownloads()
+    if !partials.isEmpty {
+        print("Unfinished downloads")
+        for partial in partials {
+            print("  \(partial.fileName)  (\(formatter.string(fromByteCount: partial.bytes)) so far)")
+        }
+        print("")
+    }
     print("Folder: \(library.directory.path)")
+    return 0
+}
+
+func runRemoveModel(_ arguments: Arguments) throws -> Int32 {
+    guard arguments.positional.count == 1, let name = arguments.positional.first else {
+        throw CLIError("remove-model needs the file name of one model. See lucid-cli models.")
+    }
+    let library = ModelLibrary.standard
+    let formatter = ByteCountFormatter()
+    formatter.countStyle = .file
+    do {
+        let freed = try library.remove(name)
+        print("Deleted \(name), freeing \(formatter.string(fromByteCount: freed)).")
+    } catch ModelError.notFound {
+        guard let bytes = library.partialBytes(of: name) else { throw ModelError.notFound(name) }
+        try library.discardPartial(of: name)
+        print("Deleted the unfinished download of \(name), freeing \(formatter.string(fromByteCount: bytes)).")
+    }
     return 0
 }
 
@@ -410,6 +437,7 @@ func run() async throws -> Int32 {
     case "models": return runModels()
     case "add-model": return try runAddModel(arguments)
     case "download": return try await runDownload(arguments)
+    case "remove-model": return try runRemoveModel(arguments)
     case "clean": return try await runClean(arguments)
     case "transcribe": return try await runDictate(arguments, transcribeOnly: true)
     case "dictate": return try await runDictate(arguments, transcribeOnly: false)
