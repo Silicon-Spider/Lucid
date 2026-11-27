@@ -52,6 +52,8 @@ lucid-cli: command-line access to Lucid's dictation pipeline
   lucid-cli download [--style s1|general] <model or link> [file]
                                         list a Hugging Face model's files, or download one
   lucid-cli remove-model <file>         delete a model, or an unfinished download of one
+  lucid-cli rename-model <file> <name>  give a model your own name. An empty name puts the
+                                        original back. The file keeps its name.
   lucid-cli clean [options] <text>      clean up a transcript given as text
   lucid-cli transcribe <file.wav>...    speech to text only
   lucid-cli dictate [options] <file.wav>...
@@ -175,6 +177,7 @@ func runModels() -> Int32 {
         if matching.isEmpty { print("  none") }
         for model in matching {
             var notes = [formatter.string(fromByteCount: model.bytes)]
+            if model.name != ModelLibrary.defaultName(for: model.fileName) { notes.insert("named \"\(model.name)\"", at: 0) }
             if model.isBuiltIn { notes.append("built in") }
             if let style = model.style { notes.append("\(style.rawValue) prompt") }
             print("  \(model.fileName)  (\(notes.joined(separator: ", ")))")
@@ -190,6 +193,20 @@ func runModels() -> Int32 {
         print("")
     }
     print("Folder: \(library.directory.path)")
+    return 0
+}
+
+func runRenameModel(_ arguments: Arguments) throws -> Int32 {
+    guard arguments.positional.count >= 2, let file = arguments.positional.first else {
+        throw CLIError("rename-model needs a model's file name and its new name. See lucid-cli models.")
+    }
+    let wanted = arguments.positional.dropFirst().joined(separator: " ")
+    let name = try ModelLibrary.standard.rename(file, to: wanted)
+    if name == ModelLibrary.defaultName(for: file) {
+        print("\(file) has its original name again: \(name).")
+    } else {
+        print("\(file) is now called \(name).")
+    }
     return 0
 }
 
@@ -225,7 +242,7 @@ func runAddModel(_ arguments: Arguments) throws -> Int32 {
         print("Try it with: lucid-cli eval --model \(model.fileName)")
     }
     if let warning = added.warning { print("Note: \(warning)") }
-    print("Choose it for the app in Lucid's Settings, Models.")
+    print("Choose it for the app under Models in Lucid's window.")
     return 0
 }
 
@@ -262,7 +279,7 @@ func runDownload(_ arguments: Arguments) async throws -> Int32 {
     let model = added.model
     print("Added \(model.fileName) as a \(model.kind == .speech ? "speech" : "cleanup") model.")
     if let warning = added.warning { print("Note: \(warning)") }
-    print("Choose it for the app in Lucid's Settings, Models.")
+    print("Choose it for the app under Models in Lucid's window.")
     return 0
 }
 
@@ -438,6 +455,7 @@ func run() async throws -> Int32 {
     case "add-model": return try runAddModel(arguments)
     case "download": return try await runDownload(arguments)
     case "remove-model": return try runRemoveModel(arguments)
+    case "rename-model": return try runRenameModel(arguments)
     case "clean": return try await runClean(arguments)
     case "transcribe": return try await runDictate(arguments, transcribeOnly: true)
     case "dictate": return try await runDictate(arguments, transcribeOnly: false)

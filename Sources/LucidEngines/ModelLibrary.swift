@@ -13,7 +13,8 @@ public enum ModelKind: String, Codable, CaseIterable, Sendable {
 public struct InstalledModel: Equatable, Identifiable, Sendable {
     public var fileName: String
     public var kind: ModelKind
-    /// What to call the model. For a model the user added, its file name without the extension.
+    /// What to call the model: the name the user gave it, or else Lucid's name for one of its
+    /// own models, or else the file name without the extension.
     public var name: String
     /// The prompt format. Cleanup models only.
     public var style: PromptStyle?
@@ -128,7 +129,8 @@ public struct BuiltInModel: Sendable {
 /// The models in Lucid's models folder: the built-in ones that `scripts/setup.sh` downloads,
 /// and any the user added.
 ///
-/// The prompt format of each added cleanup model is kept in `models.json` in the same folder.
+/// The prompt format of each added cleanup model, and any name the user gave a model, are kept
+/// in `models.json` in the same folder.
 public struct ModelLibrary: Sendable {
     public let directory: URL
 
@@ -156,7 +158,8 @@ public struct ModelLibrary: Sendable {
     public func models() -> [InstalledModel] {
         let files = FileManager.default
         guard let names = try? files.contentsOfDirectory(atPath: directory.path) else { return [] }
-        let styles = registry().styles
+        let saved = registry()
+        let styles = saved.styles
         var builtIn: [InstalledModel] = []
         var added: [InstalledModel] = []
         for name in names where Self.mayBeModel(name) {
@@ -167,13 +170,18 @@ public struct ModelLibrary: Sendable {
             let bytes = (attributes[.size] as? NSNumber)?.int64Value ?? 0
             if let known = Self.builtIn.first(where: { $0.fileName == name }) {
                 builtIn.append(InstalledModel(
-                    fileName: name, kind: known.kind, name: known.name, style: known.style, isBuiltIn: true, bytes: bytes
+                    fileName: name,
+                    kind: known.kind,
+                    name: saved.names[name] ?? known.name,
+                    style: known.style,
+                    isBuiltIn: true,
+                    bytes: bytes
                 ))
             } else if let kind = ModelFile.kind(of: url) {
                 added.append(InstalledModel(
                     fileName: name,
                     kind: kind,
-                    name: Self.displayName(name),
+                    name: saved.names[name] ?? Self.displayName(name),
                     style: kind == .cleanup ? styles[name] ?? Self.suggestedStyle(name) : nil,
                     isBuiltIn: false,
                     bytes: bytes
@@ -399,6 +407,10 @@ public struct ModelLibrary: Sendable {
         let destination = directory.appendingPathComponent(name)
         let bytes = ((try? FileManager.default.attributesOfItem(atPath: destination.path))?[.size] as? NSNumber)?
             .int64Value ?? 0
+        var saved = registry()
+        // A name given to an earlier file of the same name does not belong to this one.
+        var changed = saved.names.removeValue(forKey: name) != nil
+        defer { if changed { try? save(saved) } }
         if let known = checked.known {
             let model = InstalledModel(
                 fileName: name, kind: known.kind, name: known.name, style: known.style, isBuiltIn: true, bytes: bytes
@@ -408,9 +420,8 @@ public struct ModelLibrary: Sendable {
         let kind = checked.format.kind
         let chosenStyle = kind == .cleanup ? style ?? Self.suggestedStyle(name) : nil
         if let chosenStyle {
-            var saved = registry()
             saved.styles[name] = chosenStyle
-            try? save(saved)
+            changed = true
         }
         let model = InstalledModel(
             fileName: name,
@@ -433,6 +444,43 @@ public struct ModelLibrary: Sendable {
         try save(saved)
     }
 
+    /// The longest name a model can be given.
+    public static let maxNameLength = 60
+
+    /// What a model is called until the user names it: Lucid's name for one of its own models,
+    /// otherwise the file name without the extension.
+    public static func defaultName(for fileName: String) -> String {
+        builtIn.first { $0.fileName == fileName }?.name ?? displayName(fileName)
+    }
+
+    /// Gives a model a name of the user's choosing, shown wherever Lucid lists models. The file
+    /// keeps its name, so nothing that refers to it changes. An empty name, or the model's
+    /// original one, goes back to the original. Returns the name now in use.
+    @discardableResult
+    public func rename(_ fileName: String, to newName: String) throws -> String {
+        let installed = models()
+        guard installed.contains(where: { $0.fileName == fileName }) else { throw ModelError.notFound(fileName) }
+        // One line, with single spaces: a pasted name may carry line breaks and tabs.
+        let name = newName.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).joined(separator: " ")
+        let original = Self.defaultName(for: fileName)
+        var saved = registry()
+        guard !name.isEmpty, name != original else {
+            if saved.names.removeValue(forKey: fileName) != nil { try save(saved) }
+            return original
+        }
+        guard name.count <= Self.maxNameLength else { throw ModelError.nameTooLong(Self.maxNameLength) }
+        // Another model's original name counts too, so that resetting it later cannot make two alike.
+        let taken = installed.contains { other in
+            other.fileName != fileName
+                && [other.name, Self.defaultName(for: other.fileName)]
+                    .contains { $0.caseInsensitiveCompare(name) == .orderedSame }
+        }
+        guard !taken else { throw ModelError.nameTaken(name) }
+        saved.names[fileName] = name
+        try save(saved)
+        return name
+    }
+
     /// Deletes a model from the models folder, Lucid's own included, and returns the bytes freed.
     /// A built-in model can be downloaded again in Settings or with `scripts/setup.sh`.
     @discardableResult
@@ -450,7 +498,9 @@ public struct ModelLibrary: Sendable {
             throw ModelError.removeFailed(error.localizedDescription)
         }
         var saved = registry()
-        if saved.styles.removeValue(forKey: fileName) != nil { try? save(saved) }
+        let hadStyle = saved.styles.removeValue(forKey: fileName) != nil
+        let hadName = saved.names.removeValue(forKey: fileName) != nil
+        if hadStyle || hadName { try? save(saved) }
         return bytes
     }
 
@@ -481,7 +531,19 @@ public struct ModelLibrary: Sendable {
     // MARK: Helpers
 
     private struct Registry: Codable {
+        /// The prompt format of each cleanup model the user added, by file name.
         var styles: [String: PromptStyle] = [:]
+        /// The names the user gave to models, by file name.
+        var names: [String: String] = [:]
+
+        init() {}
+
+        /// Either part may be missing: a file written before models could be renamed has no names.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            styles = try container.decodeIfPresent([String: PromptStyle].self, forKey: .styles) ?? [:]
+            names = try container.decodeIfPresent([String: String].self, forKey: .names) ?? [:]
+        }
     }
 
     private func registry() -> Registry {

@@ -59,6 +59,10 @@ public enum ModelError: Error, Equatable, CustomStringConvertible {
     case notFound(String)
     case copyFailed(String)
     case removeFailed(String)
+    /// Another model already has this name.
+    case nameTaken(String)
+    /// The name is longer than this many characters.
+    case nameTooLong(Int)
 
     public var description: String {
         switch self {
@@ -89,6 +93,10 @@ public enum ModelError: Error, Equatable, CustomStringConvertible {
             return "The model could not be copied into Lucid's models folder: \(reason)"
         case .removeFailed(let reason):
             return "The model could not be removed: \(reason)"
+        case .nameTaken(let name):
+            return "Another model is already called \(name). Choose a different name."
+        case .nameTooLong(let limit):
+            return "That name is too long. Use \(limit) characters or fewer."
         }
     }
 }

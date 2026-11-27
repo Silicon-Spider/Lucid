@@ -341,6 +341,101 @@ func modelLibraryTests() {
             expectTrue(FileManager.default.fileExists(atPath: target.path), "the linked model was deleted")
         }
 
+        test("gives a model a new name, and keeps it") {
+            let folder = temporaryFolder()
+            defer { try? FileManager.default.removeItem(at: folder) }
+            write(chatModel(), "s1-mini-q4_k_m.gguf", in: folder)
+            write(chatModel(), "Llama-3.2-3B-Instruct-Q4_K_M.gguf", in: folder)
+            write(whisperHeader(), "ggml-small.en.bin", in: folder)
+            let library = ModelLibrary(directory: folder)
+            try library.setStyle(.general, for: "Llama-3.2-3B-Instruct-Q4_K_M.gguf")
+
+            expectEqual(try library.rename("Llama-3.2-3B-Instruct-Q4_K_M.gguf", to: "  Work\temails \n llama "), "Work emails llama")
+            expectEqual(try library.rename("s1-mini-q4_k_m.gguf", to: "Quick cleanup"), "Quick cleanup")
+
+            let reopened = ModelLibrary(directory: folder)
+            expectEqual(reopened.models().map(\.name), ["Quick cleanup", "ggml-small.en", "Work emails llama"])
+            expectEqual(reopened.models().map(\.fileName), ["s1-mini-q4_k_m.gguf", "ggml-small.en.bin", "Llama-3.2-3B-Instruct-Q4_K_M.gguf"])
+            // Renaming changes nothing else about the model.
+            expectEqual(reopened.models().last?.style, .general)
+            expectTrue(reopened.models().first?.isBuiltIn == true)
+            expectEqual(reopened.plan(for: ModelChoices(light: "Llama-3.2-3B-Instruct-Q4_K_M.gguf")).light.fileName, "Llama-3.2-3B-Instruct-Q4_K_M.gguf")
+            expectTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("Llama-3.2-3B-Instruct-Q4_K_M.gguf").path))
+        }
+
+        test("an empty name, or the original one, puts the original name back") {
+            let folder = temporaryFolder()
+            defer { try? FileManager.default.removeItem(at: folder) }
+            write(chatModel(), "s1-mini-q4_k_m.gguf", in: folder)
+            write(whisperHeader(), "ggml-small.en.bin", in: folder)
+            let library = ModelLibrary(directory: folder)
+            try library.rename("s1-mini-q4_k_m.gguf", to: "Mine")
+            try library.rename("ggml-small.en.bin", to: "Small")
+            expectEqual(try library.rename("s1-mini-q4_k_m.gguf", to: "   "), "S1-mini by Superwhisper")
+            expectEqual(try library.rename("ggml-small.en.bin", to: "ggml-small.en"), "ggml-small.en")
+            expectEqual(library.models().map(\.name), ["S1-mini by Superwhisper", "ggml-small.en"])
+            expectEqual(ModelLibrary.defaultName(for: "s1-mini-q4_k_m.gguf"), "S1-mini by Superwhisper")
+            expectEqual(ModelLibrary.defaultName(for: "ggml-small.en.bin"), "ggml-small.en")
+        }
+
+        test("refuses a name that is taken, too long, or for a model that is not there") {
+            let folder = temporaryFolder()
+            defer { try? FileManager.default.removeItem(at: folder) }
+            write(chatModel(), "s1-mini-q4_k_m.gguf", in: folder)
+            write(chatModel(), "first.gguf", in: folder)
+            write(chatModel(), "second.gguf", in: folder)
+            let library = ModelLibrary(directory: folder)
+            try library.rename("first.gguf", to: "Favourite")
+
+            expectError(.nameTaken("favourite")) { try library.rename("second.gguf", to: "favourite") }
+            expectError(.nameTaken("s1-mini by superwhisper")) { try library.rename("second.gguf", to: "s1-mini by superwhisper") }
+            // The first model's original name is still spoken for, though it now shows another.
+            expectError(.nameTaken("first")) { try library.rename("second.gguf", to: "first") }
+            expectError(.nameTooLong(60)) { try library.rename("second.gguf", to: String(repeating: "x", count: 61)) }
+            expectEqual(try library.rename("second.gguf", to: String(repeating: "x", count: 60)).count, 60)
+            expectError(.notFound("gone.gguf")) { try library.rename("gone.gguf", to: "Anything") }
+            expectError(.notFound("models.json")) { try library.rename("models.json", to: "Anything") }
+            // Keeping its own name, in different capitals, is allowed.
+            expectEqual(try library.rename("first.gguf", to: "FAVOURITE"), "FAVOURITE")
+        }
+
+        test("forgets a model's name when the model is deleted or replaced") {
+            let folder = temporaryFolder()
+            let source = temporaryFolder()
+            defer {
+                try? FileManager.default.removeItem(at: folder)
+                try? FileManager.default.removeItem(at: source)
+            }
+            let original = write(chatModel(), "mine.gguf", in: source)
+            let library = ModelLibrary(directory: folder)
+            _ = try library.add(from: original)
+            try library.rename("mine.gguf", to: "Old name")
+            try library.remove("mine.gguf")
+            expectEqual(try library.add(from: original).model.name, "mine")
+            expectEqual(library.models().map(\.name), ["mine"])
+
+            // A file put back by hand, outside Lucid, is a new model too.
+            try library.rename("mine.gguf", to: "Second name")
+            try FileManager.default.removeItem(at: folder.appendingPathComponent("mine.gguf"))
+            expectEqual(try library.add(from: original).model.name, "mine")
+            expectEqual(library.models().map(\.name), ["mine"])
+        }
+
+        test("reads a models.json written before models could be renamed") {
+            let folder = temporaryFolder()
+            defer { try? FileManager.default.removeItem(at: folder) }
+            write(chatModel(), "old.gguf", in: folder)
+            write(Data(#"{"styles":{"old.gguf":"s1"}}"#.utf8), "models.json", in: folder)
+            let library = ModelLibrary(directory: folder)
+            expectEqual(library.models().first?.style, .s1)
+            try library.rename("old.gguf", to: "Renamed")
+            expectEqual(library.models().first?.style, .s1)
+            expectEqual(library.models().first?.name, "Renamed")
+            write(Data(#"{"names":{"old.gguf":"Only a name"}}"#.utf8), "models.json", in: folder)
+            expectEqual(library.models().first?.name, "Only a name")
+            expectEqual(library.models().first?.style, .general)
+        }
+
         test("lists and discards unfinished downloads") {
             let folder = temporaryFolder()
             defer { try? FileManager.default.removeItem(at: folder) }
