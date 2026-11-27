@@ -5,13 +5,19 @@ import SwiftUI
 @MainActor
 final class Windows: NSObject, NSWindowDelegate {
     enum Kind {
-        case settings
-        case setup
+        /// The one window with everything in it.
+        case main
 
         var title: String {
             switch self {
-            case .settings: return "Lucid Settings"
-            case .setup: return "Set Up Lucid"
+            case .main: return "Lucid"
+            }
+        }
+
+        /// The name its size and position are remembered under.
+        var autosaveName: String {
+            switch self {
+            case .main: return "LucidMainWindow"
             }
         }
     }
@@ -20,24 +26,32 @@ final class Windows: NSObject, NSWindowDelegate {
     /// Called when a window closes, so its owner can stop any polling it started.
     var onClose: ((Kind) -> Void)?
 
-    func show(_ kind: Kind, content: () -> AnyView) {
+    func isOpen(_ kind: Kind) -> Bool {
+        open[kind] != nil
+    }
+
+    /// Opens the window, sized `size` unless the user has resized it before, and never
+    /// smaller than `minimumSize`.
+    func show(_ kind: Kind, size: CGSize, minimumSize: CGSize, content: () -> AnyView) {
         if let window = open[kind] {
             bringForward(window)
             return
         }
         let hosting = NSHostingController(rootView: content())
+        // The window keeps the size the user gives it. The content only sets the smallest.
+        hosting.sizingOptions = [.minSize]
         let window = NSWindow(contentViewController: hosting)
         window.title = kind.title
-        window.styleMask = [.titled, .closable, .miniaturizable]
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
         window.isReleasedWhenClosed = false
         window.delegate = self
+        window.contentMinSize = minimumSize
+        window.setContentSize(size)
         window.center()
+        // Restores the size and position from last time, if there was one.
+        window.setFrameAutosaveName(kind.autosaveName)
         open[kind] = window
         bringForward(window)
-    }
-
-    func close(_ kind: Kind) {
-        open[kind]?.close()
     }
 
     private func bringForward(_ window: NSWindow) {

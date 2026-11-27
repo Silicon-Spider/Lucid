@@ -54,7 +54,7 @@ public enum DownloadError: Error, Equatable, CustomStringConvertible {
                 + "Private and gated models cannot be downloaded in Lucid."
         case .needsAccess(let repo):
             return "\(repo) asks you to sign in on huggingface.co and accept its licence first, and Lucid "
-                + "only downloads public models. Download it in your browser, then add the file in Settings, Models."
+                + "only downloads public models. Download it in your browser, then add the file under Models in Lucid's window."
         case .fileNotFound(let path):
             return "\(path) is not in that model's files, or it is not a file Lucid can use."
         case .noModelFiles(let repo):

@@ -150,8 +150,9 @@ final class ModelLibraryModel: ObservableObject {
         ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
-    private func name(of fileName: String) -> String {
-        installed.first { $0.fileName == fileName }?.name ?? fileName
+    /// What a model file is called: the user's name for it, or its original one.
+    func displayName(of fileName: String) -> String {
+        installed.first { $0.fileName == fileName }?.name ?? ModelLibrary.defaultName(for: fileName)
     }
 
     /// What deleting a model would change, in sentences for the confirmation. Empty when the
@@ -161,17 +162,17 @@ final class ModelLibraryModel: ObservableObject {
         let stops = "so dictation stops working until you download one again."
         var lines: [String] = []
         switch effects.speech {
-        case .switches(let next): lines.append("Lucid will use \(name(of: next)) for speech instead.")
+        case .switches(let next): lines.append("Lucid will use \(displayName(of: next)) for speech instead.")
         case .nothingLeft: lines.append("Lucid has no other speech model, " + stops)
         case nil: break
         }
         switch effects.light {
-        case .switches(let next): lines.append("Light will use \(name(of: next)) instead.")
+        case .switches(let next): lines.append("Light will use \(displayName(of: next)) instead.")
         case .nothingLeft: lines.append("Lucid has no other cleanup model, " + stops)
         case nil: break
         }
         switch effects.medium {
-        case .switches(let next): lines.append("Medium will use \(name(of: next)) instead.")
+        case .switches(let next): lines.append("Medium will use \(displayName(of: next)) instead.")
         case .nothingLeft: lines.append("Medium will use the Light model until you download one that can tighten wording.")
         case nil: break
         }
@@ -241,6 +242,21 @@ final class ModelLibraryModel: ObservableObject {
             notice = Notice(text: "\(error)", isProblem: true)
         }
         reload()
+    }
+
+    /// Gives a model the user's own name. An empty name puts the original back. Returns false,
+    /// with the reason in `notice`, when the name cannot be used.
+    @discardableResult
+    func rename(_ model: InstalledModel, to name: String) -> Bool {
+        do {
+            let now = try library.rename(model.fileName, to: name)
+            notice = now == model.name ? nil : Notice(text: "\(model.name) is now called \(now).", isProblem: false)
+            reload()
+            return true
+        } catch {
+            notice = Notice(text: "\(error)", isProblem: true)
+            return false
+        }
     }
 
     func setStyle(_ style: PromptStyle, for model: InstalledModel) {
@@ -399,10 +415,16 @@ final class SetupModel: ObservableObject {
     }
 
     func refresh() {
-        microphone = Permissions.microphone == .authorized
-        accessibility = Permissions.accessibility
-        listening = isListening()
-        fnConflict = Permissions.fnKeyConflicts
+        update(\.microphone, to: Permissions.microphone == .authorized)
+        update(\.accessibility, to: Permissions.accessibility)
+        update(\.listening, to: isListening())
+        update(\.fnConflict, to: Permissions.fnKeyConflicts)
+    }
+
+    /// Publishes only a real change. The whole window watches this model, and a value set
+    /// every second would redraw all of it every second.
+    private func update(_ keyPath: ReferenceWritableKeyPath<SetupModel, Bool>, to value: Bool) {
+        if self[keyPath: keyPath] != value { self[keyPath: keyPath] = value }
     }
 }
 

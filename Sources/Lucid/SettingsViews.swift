@@ -3,35 +3,9 @@ import LucidEngines
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The settings window: five tabs.
-struct SettingsView: View {
-    @ObservedObject var settings: AppSettings
-    @ObservedObject var engines: EngineManager
-    @ObservedObject var models: ModelLibraryModel
-    @ObservedObject var dictionary: DictionaryModel
-    @ObservedObject var history: HistoryModel
-    let onHotkey: (HotkeyChoice) -> Void
-    let onLevel: (CleanupLevel) -> Void
-    let onModels: (ModelChoices) -> Void
-    let onRetry: (HistoryEntry) -> Void
+// The parts of Lucid's window other than Home. `MainView` shows one at a time.
 
-    var body: some View {
-        TabView {
-            GeneralTab(settings: settings, engines: engines, onHotkey: onHotkey, onLevel: onLevel)
-                .tabItem { Label("General", systemImage: "gearshape") }
-            ModelsTab(settings: settings, engines: engines, library: models, onModels: onModels)
-                .tabItem { Label("Models", systemImage: "cpu") }
-            DictionaryTab(model: dictionary)
-                .tabItem { Label("Dictionary", systemImage: "character.book.closed") }
-            HistoryTab(model: history, onRetry: onRetry)
-                .tabItem { Label("History", systemImage: "clock.arrow.circlepath") }
-            AboutTab()
-                .tabItem { Label("About", systemImage: "info.circle") }
-        }
-        .frame(width: 560, height: 660)
-    }
-}
-
+/// Settings: the dictation key, the cleanup level, privacy and startup.
 struct GeneralTab: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var engines: EngineManager
@@ -94,8 +68,8 @@ struct GeneralTab: View {
         switch engines.status {
         case .starting: return "Starting the engines…"
         case .ready: return "The engines are running on this Mac."
-        case .setupNeeded: return "Setup is not finished. Open Setup Checklist from the menu."
-        case .failed: return "The engines did not start. Open Setup Checklist from the menu."
+        case .setupNeeded: return "Setup is not finished. Home shows what is missing."
+        case .failed: return "The engines did not start. Home shows why."
         }
     }
 
@@ -123,7 +97,7 @@ struct GeneralTab: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 if mediumRefused {
-                    Text("Medium needs a larger model. Download Qwen 3.5 4B (2.6 GB) or add your own in the Models tab, then choose Medium again.")
+                    Text("Medium needs a larger model. Download Qwen 3.5 4B (2.6 GB) or add your own under Models, then choose Medium again.")
                         .font(.callout)
                         .foregroundStyle(.orange)
                 }
@@ -152,6 +126,7 @@ struct GeneralTab: View {
     }
 }
 
+/// Models: choose, add, download, rename and delete the speech and cleanup models.
 struct ModelsTab: View {
     @ObservedObject var settings: AppSettings
     @ObservedObject var engines: EngineManager
@@ -286,6 +261,7 @@ struct ModelsTab: View {
                         inUse: model.kind == .speech && model.fileName == plan.speech,
                         uses: uses(of: model, in: plan),
                         onStyle: { style in library.setStyle(style, for: model) },
+                        onRename: { name in library.rename(model, to: name) },
                         onRemove: { removing = model }
                     )
                 }
@@ -380,8 +356,8 @@ struct ModelsTab: View {
     }
 }
 
-/// One model in the list: its name, what it is, a delete button, and for a cleanup model the
-/// user added, its prompt format.
+/// One model in the list: its name, what it is, buttons to rename and delete it, and for a
+/// cleanup model the user added, its prompt format.
 private struct ModelRow: View {
     let model: InstalledModel
     /// For a speech model: whether it is the one in use.
@@ -389,7 +365,16 @@ private struct ModelRow: View {
     /// For a cleanup model: the levels it is used for.
     let uses: [String]
     let onStyle: (PromptStyle) -> Void
+    /// Saves a new name. Returns false when the name cannot be used.
+    let onRename: (String) -> Bool
     let onRemove: () -> Void
+
+    @State private var renaming = false
+    @State private var draft = ""
+
+    private var originalName: String {
+        ModelLibrary.defaultName(for: model.fileName)
+    }
 
     private var detail: String {
         var parts = [
@@ -399,32 +384,63 @@ private struct ModelRow: View {
         if model.isBuiltIn { parts.append("built in") }
         if inUse { parts.append("in use") }
         if !uses.isEmpty { parts.append("used for " + uses.joined(separator: " and ")) }
+        // A renamed model still has to be findable in the models folder.
+        if model.name != originalName { parts.append(model.fileName) }
         return parts.joined(separator: " · ")
     }
 
+    private func startRenaming() {
+        draft = model.name
+        renaming = true
+    }
+
+    private func saveName() {
+        if onRename(draft) { renaming = false }
+    }
+
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(model.name)
-                Text(detail)
+        if renaming {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    TextField("Name", text: $draft, prompt: Text(originalName))
+                        .labelsHidden()
+                        .onSubmit(saveName)
+                    Button("Save", action: saveName)
+                    Button("Cancel") { renaming = false }
+                }
+                Text("This changes the name Lucid shows, not the file. Leave it empty to go back to \(originalName).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            Spacer()
-            if !model.isBuiltIn, model.kind == .cleanup {
-                Picker("Prompt", selection: Binding(get: { model.style ?? .general }, set: onStyle)) {
-                    Text("Lucid's prompt").tag(PromptStyle.general)
-                    Text("S1-mini format").tag(PromptStyle.s1)
+        } else {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.name)
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .labelsHidden()
-                .fixedSize()
-                .help("The input the model expects. S1-mini and other copies of it need the S1-mini format. Every other model takes Lucid's prompt.")
+                Spacer()
+                if !model.isBuiltIn, model.kind == .cleanup {
+                    Picker("Prompt", selection: Binding(get: { model.style ?? .general }, set: onStyle)) {
+                        Text("Lucid's prompt").tag(PromptStyle.general)
+                        Text("S1-mini format").tag(PromptStyle.s1)
+                    }
+                    .labelsHidden()
+                    .fixedSize()
+                    .help("The input the model expects. S1-mini and other copies of it need the S1-mini format. Every other model takes Lucid's prompt.")
+                }
+                Button(action: startRenaming) {
+                    Image(systemName: "pencil")
+                }
+                .buttonStyle(.borderless)
+                .help("Rename \(model.name)")
+                Button(role: .destructive, action: onRemove) {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.borderless)
+                .help("Delete \(model.name)")
             }
-            Button(role: .destructive, action: onRemove) {
-                Image(systemName: "trash")
-            }
-            .buttonStyle(.borderless)
-            .help("Delete \(model.name)")
         }
     }
 }
@@ -575,6 +591,7 @@ struct HubBrowser: View {
     }
 }
 
+/// Dictionary: words to spell exactly, and corrections for what Lucid mishears.
 struct DictionaryTab: View {
     @ObservedObject var model: DictionaryModel
     @State private var newTerm = ""
@@ -667,6 +684,7 @@ struct DictionaryTab: View {
     }
 }
 
+/// History: past dictations, each with its original wording.
 struct HistoryTab: View {
     @ObservedObject var model: HistoryModel
     let onRetry: (HistoryEntry) -> Void
@@ -770,6 +788,7 @@ private struct HistoryRow: View {
     }
 }
 
+/// About: the version, and what Lucid is built with.
 struct AboutTab: View {
     var body: some View {
         Form {

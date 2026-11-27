@@ -43,12 +43,10 @@ enum UIRenderer {
         ]
     }
 
-    /// The settings tabs and the setup checklist, filled with sample data.
+    /// Lucid's window at each of its parts, filled with sample data.
     @MainActor
     private static func windowViews() -> [(String, AnyView)] {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("lucid-render-\(UUID().uuidString)")
-        let settings = AppSettings(defaults: UserDefaults(suiteName: "lucid-render-\(UUID().uuidString)") ?? .standard)
-
         var sample = PersonalDictionary()
         sample.addTerm("GitHub")
         sample.addTerm("Kubernetes")
@@ -108,8 +106,13 @@ enum UIRenderer {
         // An unfinished download, so the Resume and Discard buttons show.
         try? Data(repeating: 0, count: 4096).write(to: modelsFolder.appendingPathComponent("ggml-base.en.bin.part"))
         let library = ModelLibraryModel(library: ModelLibrary(directory: modelsFolder))
-        let modelSettings = AppSettings(defaults: UserDefaults(suiteName: "lucid-render-\(UUID().uuidString)") ?? .standard)
-        modelSettings.models = ModelChoices(medium: "Llama-3.2-3B-Instruct-Q4_K_M.gguf")
+        let settings = AppSettings(defaults: UserDefaults(suiteName: "lucid-render-\(UUID().uuidString)") ?? .standard)
+        settings.models = ModelChoices(medium: "Llama-3.2-3B-Instruct-Q4_K_M.gguf")
+
+        // One sample model has been renamed, so the renamed look is drawn too.
+        if let small = library.installed.first(where: { $0.fileName == "ggml-small.en.bin" }) {
+            library.rename(small, to: "Quick and rough")
+        }
 
         func setup(done: Bool) -> SetupModel {
             let model = SetupModel()
@@ -119,31 +122,38 @@ enum UIRenderer {
             model.fnConflict = !done
             return model
         }
-        func checklist(done: Bool) -> AnyView {
-            AnyView(SetupView(
-                setup: setup(done: done),
-                engines: EngineManager.preview(done ? .ready : .setupNeeded(["the cleanup model, expected at ~/Library/Application Support/Lucid/models/s1-mini-q4_k_m.gguf"])),
-                settings: settings,
-                models: library,
-                onUseRightOption: {},
-                onRestart: {},
-                onDone: {}
-            ))
-        }
-        func tab(_ view: some View, height: CGFloat = 620) -> AnyView {
-            AnyView(view.frame(width: 560, height: height))
+        let dictionary = DictionaryModel(url: dictionaryURL)
+        let history = HistoryModel(store: store)
+        let missing = ["the cleanup model, expected at ~/Library/Application Support/Lucid/models/s1-mini-q4_k_m.gguf"]
+
+        /// The whole window at one of its parts. `height` can be taller than a real window, to show a long part in full.
+        func window(_ section: MainSection, done: Bool = true, height: CGFloat = MainWindowSize.starting.height) -> AnyView {
+            let model = MainWindowModel()
+            model.section = section
+            return AnyView(
+                MainView(
+                    window: model,
+                    settings: settings,
+                    engines: EngineManager.preview(done ? .ready : .setupNeeded(missing)),
+                    setup: setup(done: done),
+                    models: library,
+                    dictionary: dictionary,
+                    history: history,
+                    actions: MainActions()
+                )
+                .frame(width: MainWindowSize.starting.width, height: height)
+            )
         }
 
-        let engines = EngineManager.preview(.ready)
         return [
-            ("settings-general", tab(GeneralTab(settings: settings, engines: engines, onHotkey: { _ in }, onLevel: { _ in }))),
+            ("window-home", window(.home, height: 900)),
+            ("window-home-to-do", window(.home, done: false, height: 900)),
             // Tall enough to show the download section below the list of models.
-            ("settings-models", tab(ModelsTab(settings: modelSettings, engines: engines, library: library, onModels: { _ in }), height: 1250)),
-            ("settings-dictionary", tab(DictionaryTab(model: DictionaryModel(url: dictionaryURL)))),
-            ("settings-history", tab(HistoryTab(model: HistoryModel(store: store), onRetry: { _ in }))),
-            ("settings-about", tab(AboutTab())),
-            ("setup-to-do", checklist(done: false)),
-            ("setup-done", checklist(done: true)),
+            ("window-models", window(.models, height: 1400)),
+            ("window-dictionary", window(.dictionary)),
+            ("window-history", window(.history)),
+            ("window-settings", window(.settings)),
+            ("window-about", window(.about)),
         ]
     }
 

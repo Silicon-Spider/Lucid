@@ -3,52 +3,103 @@ import LucidCore
 import LucidEngines
 import SwiftUI
 
-/// The first-run checklist: what Lucid needs, and the one action that provides each thing.
-struct SetupView: View {
-    @ObservedObject var setup: SetupModel
-    @ObservedObject var engines: EngineManager
+/// The first part of Lucid's window: whether it is ready, what it still needs, which models
+/// and settings are in use, and the latest dictation.
+struct HomeView: View {
     @ObservedObject var settings: AppSettings
+    @ObservedObject var engines: EngineManager
+    @ObservedObject var setup: SetupModel
     @ObservedObject var models: ModelLibraryModel
+    @ObservedObject var history: HistoryModel
     let onUseRightOption: () -> Void
     let onRestart: () -> Void
-    let onDone: () -> Void
+    /// Shows another part of the window.
+    let onOpen: (MainSection) -> Void
 
     private var enginesReady: Bool { engines.status == .ready }
     private var keyReady: Bool { setup.accessibility && setup.listening }
     private var fnReady: Bool { settings.hotkey != .fn || !setup.fnConflict }
     private var everythingReady: Bool { setup.microphone && keyReady && enginesReady && fnReady }
 
+    /// The cleanup level in one word, and the model that does it.
+    private var cleanupSummary: String {
+        let level = settings.level.rawValue.capitalized
+        guard settings.level != .off else { return level }
+        let plan = models.plan(for: settings.models)
+        return level + ", with " + models.displayName(of: plan.cleanup(for: settings.level).fileName)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Set up Lucid")
-                    .font(.title2.weight(.semibold))
-                Text("Four things, then you can dictate into any app.")
-                    .foregroundStyle(.secondary)
+        Form {
+            Section {
+                HStack(spacing: 14) {
+                    Image(systemName: everythingReady ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .font(.largeTitle)
+                        .foregroundStyle(everythingReady ? Color.green : Color.orange)
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(everythingReady ? "Lucid is ready" : "Lucid needs a few things first")
+                            .font(.title2.weight(.semibold))
+                        Text(
+                            everythingReady
+                                ? "Hold \(settings.hotkey.title) and speak, then let go. Tap it twice to keep recording hands-free."
+                                : "It will work once every item under Setup is ticked."
+                        )
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.vertical, 4)
             }
-            .padding(20)
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 18) {
+            Section("Setup") {
                 microphoneRow
                 accessibilityRow
                 enginesRow
                 fnRow
             }
-            .padding(20)
 
-            Divider()
-
-            HStack {
-                Text(everythingReady ? "Ready. Hold \(settings.hotkey.title) and speak." : "Lucid will work once every item is ticked.")
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button("Done", action: onDone)
+            Section("In use") {
+                SummaryRow(label: "Dictation key", value: settings.hotkey.title) { onOpen(.settings) }
+                SummaryRow(label: "Cleanup", value: cleanupSummary) { onOpen(.settings) }
+                SummaryRow(
+                    label: "Speech model",
+                    value: models.displayName(of: models.plan(for: settings.models).speech)
+                ) { onOpen(.models) }
             }
-            .padding(20)
+
+            Section("Latest dictation") {
+                latestDictation
+            }
         }
-        .frame(width: 540)
+        .formStyle(.grouped)
+    }
+
+    @ViewBuilder
+    private var latestDictation: some View {
+        if let entry = history.entries.first {
+            if let result = entry.result {
+                Text(result.finalText)
+                    .textSelection(.enabled)
+                HStack(spacing: 14) {
+                    Button("Copy") { TextInserter.copy(result.finalText) }
+                    Button("Copy Original") { TextInserter.copy(result.raw) }
+                    Spacer()
+                    Button("Show History") { onOpen(.history) }
+                }
+                .buttonStyle(.borderless)
+                .font(.callout)
+            } else {
+                Text("The latest dictation failed. \(entry.failure ?? "")")
+                    .foregroundStyle(.orange)
+                Button("Show History") { onOpen(.history) }
+                    .buttonStyle(.borderless)
+                    .font(.callout)
+            }
+        } else {
+            Text("Nothing yet. Hold \(settings.hotkey.title) and speak.")
+                .foregroundStyle(.secondary)
+        }
     }
 
     private var microphoneRow: some View {
@@ -170,6 +221,24 @@ struct SetupView: View {
                 Button("Open Keyboard Settings…") { Permissions.openKeyboardSettings() }
                 Button("Use Right Option Instead", action: onUseRightOption)
             }
+        }
+    }
+}
+
+/// One setting on the Home page: what it is, its value, and a button that goes to where it is changed.
+private struct SummaryRow: View {
+    let label: String
+    let value: String
+    let onChange: () -> Void
+
+    var body: some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Button("Change…", action: onChange)
         }
     }
 }

@@ -37,18 +37,18 @@ scripts/build-app.sh    # builds dist/Lucid.app
 open dist/Lucid.app
 ```
 
-A waveform icon appears in the menu bar, and a setup checklist opens. It walks you through
-four things:
+A waveform icon appears in the menu bar, and Lucid's window opens at Home. Its Setup list
+walks you through four things:
 
 1. **Microphone.** Allow it when asked.
 2. **Accessibility.** Switch Lucid on in System Settings, Privacy & Security,
    Accessibility. Lucid needs this to see the dictation key and to type for you. If the
-   checklist then offers Restart Lucid, press it.
+   list then offers Restart Lucid, press it.
 3. **Speech engines and models.** Ticked once `scripts/setup.sh` has run. If only the models
-   are missing, the checklist can download them.
+   are missing, the list can download them.
 4. **The dictation key.** On a MacBook this is Fn. macOS also uses Fn for its own
    shortcut, so set "Press 🌐 key to" to "Do Nothing" in Keyboard settings, or choose
-   Right Option in the checklist.
+   Right Option in the list.
 
 To keep Lucid, move `dist/Lucid.app` to your Applications folder.
 
@@ -68,29 +68,43 @@ in the Accessibility list.
 A small pill at the bottom of the screen shows bars while it listens and dots while it
 works. If there is nowhere to type, the text is left on the clipboard and the pill says so.
 
+### Lucid's window
+
+Everything else is in one window. Choose Open Lucid from the menu-bar icon. Its parts are
+listed down the left:
+
+| Part | What it is for |
+|---|---|
+| Home | Whether Lucid is ready, the Setup list, what is in use, and your latest dictation. |
+| Models | Choose, download, add, rename and delete the speech and cleanup models. |
+| Dictionary | Words to spell exactly, and corrections. |
+| History | Past dictations, each with its original wording. |
+| Settings | The dictation key, the cleanup level, recordings, and opening at login. |
+| About | The version, and what Lucid is built with. |
+
 ### Cleanup levels
 
-Choose one from the menu or in Settings.
+Choose one from the menu, or under Settings in Lucid's window.
 
 | Level | What it does |
 |---|---|
 | Off | Inserts exactly what you said. |
 | Light (default) | Removes fillers, false starts and corrections. Fixes punctuation. Formats spoken lists. Keeps every other word. |
-| Medium | Also tightens wordy phrasing. Slower. Needs an extra 2.6 GB model: download Qwen 3.5 4B in Settings, Models, or use [one of your own](#your-own-models). |
+| Medium | Also tightens wordy phrasing. Slower. Needs an extra 2.6 GB model: download Qwen 3.5 4B under Models, or use [one of your own](#your-own-models). |
 
 Lucid also adapts to where you are typing. In chat apps a short message loses its closing
 full stop. In terminals, editors and AI chat apps it does not format lists.
 
 ### Your words
 
-In Settings, Dictionary:
+Under Dictionary:
 
 - **Words to spell exactly**: names, products and jargon, such as GitHub.
 - **Corrections**: when Lucid keeps mishearing something, say what to write instead.
 
 ### Your own models
 
-Lucid comes with its own models, and you can add others. In Settings, Models:
+Lucid comes with its own models, and you can add others. Under Models:
 
 - **Download from Hugging Face** lists Lucid's own models and a few others worth trying,
   each with a Download button. **Download Another Model…** takes the name of any public
@@ -103,6 +117,10 @@ Lucid comes with its own models, and you can add others. In Settings, Models:
   kind llama.cpp runs.
 - Then choose the speech model, and the cleanup model for Light and for Medium. Medium needs
   a model that takes Lucid's own prompt.
+
+To rename a model, press its pencil button and type a name of your own, such as "Quick and
+rough". This changes the name Lucid shows, not the file. An empty name puts the original
+back.
 
 To delete a model, Lucid's own included, press its trash button. If Lucid was using it, the
 confirmation says what takes its place, and an unfinished download can be discarded the
@@ -123,10 +141,9 @@ answers a question or drops part of what you said, the rules output is used inst
 
 ### History
 
-Settings, History lists your dictations. Each one keeps its original wording, so you can
-always get back what you actually said. A dictation that failed can be retried from its
-recording. The last 20 recordings are kept for 7 days. You can switch that off in
-Settings.
+History lists your dictations. Each one keeps its original wording, so you can always get
+back what you actually said. A dictation that failed can be retried from its recording. The
+last 20 recordings are kept for 7 days. You can switch that off under Settings.
 
 ## How it works
 
@@ -166,6 +183,7 @@ swift run lucid-cli add-model ggml-small.en.bin    # add a model of your own
 swift run lucid-cli download ggerganov/whisper.cpp # list a Hugging Face model's files
 swift run lucid-cli download ggerganov/whisper.cpp ggml-base.en.bin
 swift run lucid-cli remove-model ggml-base.en.bin  # delete a model
+swift run lucid-cli rename-model ggml-base.en.bin "Quick and rough"
 swift run lucid-cli dictate --speech-model ggml-small.en.bin recording.wav
 swift run lucid-cli eval --model my-model.gguf     # try a cleanup model on the test set
 ```
@@ -188,21 +206,24 @@ Then by hand, with Lucid running:
 4. Tap the key twice, speak, then press it once. The text appears.
 5. Hold the key and say nothing. The pill says "Didn't catch that".
 6. Click the Desktop, then dictate. The pill says "Copied. Press ⌘V".
-7. In Settings, Models, download Whisper base.en and choose it. The progress bar fills, the
-   tab says the engines are running with these models, and dictation still works.
-8. Quit Lucid. `pgrep -f "whisper-server|llama-server"` prints nothing.
+7. Open Lucid from the menu. Under Models, download Whisper base.en and choose it. The
+   progress bar fills, the page says the engines are running with these models, and
+   dictation still works.
+8. Press the pencil beside it, name it "Quick and rough", and save. The new name shows in the
+   list and in the speech model picker. Then delete it with its trash button.
+9. Quit Lucid. `pgrep -f "whisper-server|llama-server"` prints nothing.
 
 ## Troubleshooting
 
 | Problem | Try |
 |---|---|
-| The key does nothing | Open Setup Checklist from the menu. Accessibility is the usual cause, especially after a rebuild. |
+| The key does nothing | Open Lucid from the menu. Home shows what is missing. Accessibility is the usual cause, especially after a rebuild. |
 | Holding Fn opens the emoji picker or changes keyboard | Set "Press 🌐 key to" to "Do Nothing" in Keyboard settings, or switch to Right Option. |
-| The menu says "Setup needed" | Run `scripts/setup.sh`, then quit and reopen Lucid. |
+| The menu says "Setup needed" | Open Lucid from the menu. Home says what is missing. Download the models there, or run `scripts/setup.sh` if the engines are missing, then quit and reopen Lucid. |
 | The first word is cut off | The microphone takes a moment to start. Pause briefly after pressing the key. |
 | Text goes to the clipboard instead of being typed | The focused control is not a text field, or it is a password field. Press ⌘V where you want it. |
 | A download stops or fails | Press Download again. It continues where it stopped. For a gated model, download it in your browser and add the file. |
-| A model you added does not start | Settings, Models says why. Choose Lucid's own model to go back. The engine logs say more. |
+| A model you added does not start | Models, in Lucid's window, says why. Choose Lucid's own model to go back. The engine logs say more. |
 | Something else | Engine logs are in `~/Library/Logs/Lucid/`. They never contain what you said. |
 
 ## Limits
