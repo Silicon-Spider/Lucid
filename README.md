@@ -22,6 +22,9 @@ only been checked by hand-run steps, listed under [Check it works](#check-it-wor
 
 ## Requirements
 
+The Lucid app is for the Mac. On Windows and Linux its command-line tool works: see
+[Windows and Linux](#windows-and-linux).
+
 - A Mac with Apple Silicon, running macOS 14 or later.
 - [Homebrew](https://brew.sh).
 - The Swift compiler. `xcode-select --install` provides it. Xcode is not needed.
@@ -189,11 +192,38 @@ swift run lucid-cli download ggerganov/whisper.cpp # list a Hugging Face model's
 swift run lucid-cli download ggerganov/whisper.cpp ggml-base.en.bin
 swift run lucid-cli remove-model ggml-base.en.bin  # delete a model
 swift run lucid-cli rename-model ggml-base.en.bin "Quick and rough"
+swift run lucid-cli folder models                  # where Lucid keeps its models
 swift run lucid-cli dictate --speech-model ggml-small.en.bin recording.wav
 swift run lucid-cli eval --model my-model.gguf     # try a cleanup model on the test set
 ```
 
 Audio files must be 16 kHz mono 16-bit WAV.
+
+## Windows and Linux
+
+The Lucid app, with its dictation key, pill and window, is built on Apple's frameworks and
+runs only on a Mac. Everything underneath it runs on Windows and Linux too, through
+`lucid-cli`: speech to text, cleanup with its guardrails, your dictionary, and downloading,
+renaming and deleting models. You give it a recording and it gives you clean text. It cannot
+yet listen to a microphone or type into other apps there.
+
+On Windows, install [Swift](https://www.swift.org/install/windows) 6.2 or later, then in
+PowerShell:
+
+```powershell
+git clone https://github.com/Silicon-Spider/Lucid.git
+cd Lucid
+scripts\setup.ps1          # builds lucid-cli, downloads the engines and the models (about 1 GB)
+scripts\integration.ps1    # the whole pipeline on synthesised speech
+swift run -c release lucid-cli dictate recording.wav
+```
+
+`scripts\setup.ps1` puts whisper.cpp and llama.cpp in folders of their own inside Lucid's
+engines folder. `lucid-cli folder engines` prints where that is.
+
+On Linux, put `whisper-server` and `llama-server` on the PATH, or in folders of their own
+inside the engines folder, and download the models with `lucid-cli download`.
+`lucid-cli doctor` says what is missing and where it is expected.
 
 ## Check it works
 
@@ -202,11 +232,17 @@ scripts/test.sh           # unit tests
 scripts/integration.sh    # the whole pipeline on synthesised speech
 ```
 
-**CI.** On every pull request, and on every push to `main`, GitHub Actions builds Lucid on a
-Mac, runs the unit tests, and draws the app's windows with `Lucid --render-ui`
-([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The drawings are PNG files in the
-`ui` download under Artifacts, on the run's page. CI does not run `scripts/integration.sh`,
-because it needs the models.
+**CI.** On every pull request, and on every push to `main`, GitHub Actions
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)):
+
+- builds Lucid on a Mac, runs the unit tests, and draws the app's windows with
+  `Lucid --render-ui`. The drawings are PNG files in the `ui` download under Artifacts, on
+  the run's page.
+- builds `lucid-cli` and runs the unit tests on Linux and on Windows.
+- on Windows, runs `scripts\setup.ps1` and `scripts\integration.ps1`: the real engines and
+  models, turning synthesised speech into clean text.
+
+The Mac's own end-to-end check, `scripts/integration.sh`, is not part of CI. Run it by hand.
 
 Then by hand, with Lucid running:
 
@@ -240,6 +276,7 @@ Then by hand, with Lucid running:
 ## Limits
 
 - English only.
+- The app is for the Mac. On Windows and Linux only `lucid-cli` works, on recordings.
 - Lucid uses the Mac's default microphone. Change it in System Settings, Sound.
 - Pasting uses ⌘V, so it assumes a keyboard layout where that works.
 - Speech recognition was measured with synthesised speech, not a range of real voices and

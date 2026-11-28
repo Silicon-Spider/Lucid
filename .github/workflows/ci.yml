@@ -87,3 +87,40 @@ jobs:
 
       - name: Unit tests
         run: swift run LucidCoreTests
+
+  # The real thing on Windows: the engines and models that scripts\setup.ps1 installs, turning
+  # synthesised speech into clean text. The unit tests above use stand-ins for both.
+  windows-dictation:
+    name: Dictate on Windows
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Swift
+        uses: compnerd/gha-setup-swift@9ff1ee4c44888c5817fc14d1b257ac8cabb4935f
+        with:
+          swift-version: swift-6.2.3-release
+          swift-build: 6.2.3-RELEASE
+
+      # About 1 GB of engines and models. Kept between runs, so they are downloaded once.
+      - name: Keep the engines and models
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\Lucid
+          key: lucid-windows-${{ hashFiles('scripts/setup.ps1') }}
+
+      - name: Set up
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts\setup.ps1
+
+      # Windows PowerShell, not PowerShell 7: it is the one that has the speech synthesiser.
+      - name: Dictate synthesised speech
+        shell: powershell
+        run: |
+          scripts\integration.ps1 | Tee-Object -FilePath dictation.txt
+          $said = Get-Content dictation.txt -Raw
+          if ($said -notmatch 'see you') { throw 'The speech engine did not hear "see you then".' }
+          if ($said -notmatch 'cleanup model used') { throw 'The cleanup engine was never used.' }
+          if ($said -match 'Paris') { throw 'Lucid answered a dictated question instead of cleaning it.' }
