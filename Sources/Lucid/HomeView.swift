@@ -177,7 +177,8 @@ struct HomeView: View {
                 Button("Stop") {
                     for download in downloads { models.cancelDownload(download.remote.fileName) }
                 }
-            } else if !downloadable.isEmpty {
+            } else if !downloadable.isEmpty, !engines.enginesMissing {
+                // Without the engines, the models alone would not finish setup.
                 Button("Download Models (\(downloadSize))") { models.downloadSuggested(downloadable) }
             }
         }
@@ -196,7 +197,8 @@ struct HomeView: View {
                 let total = downloads.compactMap(\.total).reduce(0, +)
                 detail = "Downloading the models from Hugging Face: \(Self.size(received)) of \(Self.size(total))."
             } else if engines.enginesMissing {
-                detail = "In Terminal, from the Lucid folder, run:  scripts/setup.sh\nThen quit and reopen Lucid. Missing: "
+                detail = "The speech engines are not installed. In Terminal, from the Lucid folder, run:  scripts/setup.sh\n"
+                    + "It installs them and downloads the models. Then quit and reopen Lucid. Missing: "
                     + missing.joined(separator: "; ") + "."
             } else {
                 detail = "Lucid needs its speech and cleanup models, downloaded once from Hugging Face. Missing: "

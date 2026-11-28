@@ -93,12 +93,12 @@ struct MainView: View {
     }
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            List(MainSection.allCases, id: \.self, selection: selection) { section in
-                Label(section.title, systemImage: section.icon)
-            }
-            .listStyle(.sidebar)
-            Divider()
+        List(MainSection.allCases, id: \.self, selection: selection) { section in
+            Label(section.title, systemImage: section.icon)
+        }
+        .listStyle(.sidebar)
+        // Inside the list's own area, so the status sits on the sidebar's background.
+        .safeAreaInset(edge: .bottom) {
             HStack(spacing: 7) {
                 Circle()
                     .fill(statusColor)
@@ -107,7 +107,8 @@ struct MainView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
-            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
             .accessibilityElement(children: .combine)
         }
         .frame(width: 190)
