@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// One helper process: a server binary listening on a local port.
 ///
@@ -31,7 +34,7 @@ public final class ServerProcess: @unchecked Sendable {
     public func start() throws {
         let files = FileManager.default
         try files.createDirectory(at: logURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        files.createFile(atPath: logURL.path, contents: nil)
+        _ = files.createFile(atPath: logURL.path, contents: nil)
         let log = try FileHandle(forWritingTo: logURL)
 
         process.executableURL = executable
@@ -67,38 +70,26 @@ public final class ServerProcess: @unchecked Sendable {
 
     /// Stops the process, forcefully if it has not exited within two seconds.
     public func stop() {
-        guard isRunning else { return }
-        process.terminate()
-        let deadline = Date().addingTimeInterval(2)
-        while process.isRunning, Date() < deadline { usleep(50_000) }
-        if process.isRunning {
-            kill(process.processIdentifier, SIGKILL)
-            process.waitUntilExit()
+        Self.stop([self])
+    }
+
+    /// Stops several processes at once. Each is asked to stop, and any that has not within
+    /// two seconds of being asked is stopped by force. Together, so that the wait is two
+    /// seconds at most however many there are: some engines do not stop when asked.
+    public static func stop(_ servers: [ServerProcess], patience: TimeInterval = 2) {
+        let running = servers.filter(\.isRunning)
+        guard !running.isEmpty else { return }
+        for server in running { server.process.terminate() }
+        let deadline = Date().addingTimeInterval(patience)
+        while Date() < deadline, running.contains(where: { $0.process.isRunning }) { Platform.pause() }
+        for server in running where server.process.isRunning {
+            Platform.forceStop(server.process)
+            server.process.waitUntilExit()
         }
     }
 
     /// Asks the system for a free local port.
     public static func freePort() throws -> Int {
-        let descriptor = socket(AF_INET, SOCK_STREAM, 0)
-        guard descriptor >= 0 else { throw EngineError.launchFailed("could not open a socket") }
-        defer { close(descriptor) }
-
-        var address = sockaddr_in()
-        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        address.sin_family = sa_family_t(AF_INET)
-        address.sin_port = 0
-        address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
-        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
-
-        let bound = withUnsafeMutablePointer(to: &address) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(descriptor, $0, length) }
-        }
-        guard bound == 0 else { throw EngineError.launchFailed("could not reserve a local port") }
-
-        let named = withUnsafeMutablePointer(to: &address) { pointer in
-            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(descriptor, $0, &length) }
-        }
-        guard named == 0 else { throw EngineError.launchFailed("could not read the reserved port") }
-        return Int(UInt16(bigEndian: address.sin_port))
+        try Platform.freePort()
     }
 }

@@ -15,6 +15,8 @@ final class PillModel: ObservableObject {
     /// The microphone level, where speech is roughly 0.02 to 0.2.
     @Published var level: Float = 0
     @Published var pulsing = false
+    /// The last few words heard so far, shown while recording. Empty until there are some.
+    @Published var preview = ""
 }
 
 /// The on-screen indicator: a small dark capsule.
@@ -43,14 +45,33 @@ struct PillView: View {
             EmptyView()
         case .recording:
             LevelBars(level: model.level)
+            if !model.preview.isEmpty {
+                PreviewText(text: model.preview)
+            }
         case .handsFree:
             LevelBars(level: model.level)
-            Text("Hands-free. Press the key again to finish.")
+            if model.preview.isEmpty {
+                Text("Hands-free. Press the key again to finish.")
+            } else {
+                PreviewText(text: model.preview)
+            }
         case .processing:
             ProcessingDots()
         case .message(let text):
             Text(text)
         }
+    }
+}
+
+/// The last few words heard, on one line. If they are too long for the pill, the start is cut.
+private struct PreviewText: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .lineLimit(1)
+            .truncationMode(.head)
+            .frame(maxWidth: 330)
     }
 }
 
@@ -120,6 +141,8 @@ final class PillController {
 
     func show(_ state: PillState) {
         pendingHide?.cancel()
+        // Words heard belong to one recording. Hands-free carries on the same one.
+        if state != .handsFree { model.preview = "" }
         model.state = state
         if state == .hidden {
             panel.orderOut(nil)
@@ -151,6 +174,11 @@ final class PillController {
 
     func setLevel(_ level: Float) {
         model.level = level
+    }
+
+    /// Shows the last few words heard so far, beside the level bars.
+    func setPreview(_ text: String) {
+        model.preview = text
     }
 
     /// Bottom centre of the screen that holds the mouse pointer, clear of the Dock.

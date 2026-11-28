@@ -23,10 +23,11 @@ enum UIRenderer {
 
     @MainActor
     private static func pillViews() -> [(String, AnyView)] {
-        func pill(_ state: PillState, level: Float = 0) -> AnyView {
+        func pill(_ state: PillState, level: Float = 0, preview: String = "") -> AnyView {
             let model = PillModel()
             model.state = state
             model.level = level
+            model.preview = preview
             // A mid-grey backdrop shows the pill's edge the way a real desktop would.
             return AnyView(
                 PillView(model: model)
@@ -37,18 +38,18 @@ enum UIRenderer {
         return [
             ("pill-recording-quiet", pill(.recording, level: 0.01)),
             ("pill-recording-loud", pill(.recording, level: 0.12)),
+            ("pill-recording-words", pill(.recording, level: 0.1, preview: "…we could meet at three at the usual place")),
             ("pill-hands-free", pill(.handsFree, level: 0.06)),
+            ("pill-hands-free-words", pill(.handsFree, level: 0.06, preview: "So I was thinking")),
             ("pill-processing", pill(.processing)),
             ("pill-message", pill(.message("Copied. Press ⌘V"))),
         ]
     }
 
-    /// The settings tabs and the setup checklist, filled with sample data.
+    /// Lucid's window at each of its parts, filled with sample data.
     @MainActor
     private static func windowViews() -> [(String, AnyView)] {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("lucid-render-\(UUID().uuidString)")
-        let settings = AppSettings(defaults: UserDefaults(suiteName: "lucid-render-\(UUID().uuidString)") ?? .standard)
-
         var sample = PersonalDictionary()
         sample.addTerm("GitHub")
         sample.addTerm("Kubernetes")
@@ -91,28 +92,6 @@ enum UIRenderer {
             wav: nil
         )
 
-        func setup(done: Bool) -> SetupModel {
-            let model = SetupModel()
-            model.microphone = done
-            model.accessibility = done
-            model.listening = done
-            model.fnConflict = !done
-            return model
-        }
-        func checklist(done: Bool) -> AnyView {
-            AnyView(SetupView(
-                setup: setup(done: done),
-                engines: EngineManager.preview(done ? .ready : .setupNeeded(["the cleanup model, expected at ~/Library/Application Support/Lucid/models/s1-mini-q4_k_m.gguf"])),
-                settings: settings,
-                onUseRightOption: {},
-                onRestart: {},
-                onDone: {}
-            ))
-        }
-        func tab(_ view: some View) -> AnyView {
-            AnyView(view.frame(width: 560, height: 620))
-        }
-
         // Model files only need their first bytes for the library to recognise them.
         let modelsFolder = folder.appendingPathComponent("models")
         try? FileManager.default.createDirectory(at: modelsFolder, withIntermediateDirectories: true)
@@ -127,19 +106,57 @@ enum UIRenderer {
         for name in [EngineConfig.s1Mini.fileName, "Llama-3.2-3B-Instruct-Q4_K_M.gguf"] {
             try? gguf.write(to: modelsFolder.appendingPathComponent(name))
         }
+        // An unfinished download, so the Resume and Discard buttons show.
+        try? Data(repeating: 0, count: 4096).write(to: modelsFolder.appendingPathComponent("ggml-base.en.bin.part"))
         let library = ModelLibraryModel(library: ModelLibrary(directory: modelsFolder))
-        let modelSettings = AppSettings(defaults: UserDefaults(suiteName: "lucid-render-\(UUID().uuidString)") ?? .standard)
-        modelSettings.models = ModelChoices(medium: "Llama-3.2-3B-Instruct-Q4_K_M.gguf")
+        let settings = AppSettings(defaults: UserDefaults(suiteName: "lucid-render-\(UUID().uuidString)") ?? .standard)
+        settings.models = ModelChoices(medium: "Llama-3.2-3B-Instruct-Q4_K_M.gguf")
 
-        let engines = EngineManager.preview(.ready)
+        // One sample model has been renamed, so the renamed look is drawn too.
+        if let small = library.installed.first(where: { $0.fileName == "ggml-small.en.bin" }) {
+            library.rename(small, to: "Quick and rough")
+        }
+
+        func setup(done: Bool) -> SetupModel {
+            let model = SetupModel()
+            model.microphone = done
+            model.accessibility = done
+            model.listening = done
+            model.fnConflict = !done
+            return model
+        }
+        let dictionary = DictionaryModel(url: dictionaryURL)
+        let history = HistoryModel(store: store)
+        let missing = ["the cleanup model, expected at ~/Library/Application Support/Lucid/models/s1-mini-q4_k_m.gguf"]
+
+        /// The whole window at one of its parts. `height` can be taller than a real window, to show a long part in full.
+        func window(_ section: MainSection, done: Bool = true, height: CGFloat = MainWindowSize.starting.height) -> AnyView {
+            let model = MainWindowModel()
+            model.section = section
+            return AnyView(
+                MainView(
+                    window: model,
+                    settings: settings,
+                    engines: EngineManager.preview(done ? .ready : .setupNeeded(missing)),
+                    setup: setup(done: done),
+                    models: library,
+                    dictionary: dictionary,
+                    history: history,
+                    actions: MainActions()
+                )
+                .frame(width: MainWindowSize.starting.width, height: height)
+            )
+        }
+
         return [
-            ("settings-general", tab(GeneralTab(settings: settings, engines: engines, onHotkey: { _ in }, onLevel: { _ in }))),
-            ("settings-models", tab(ModelsTab(settings: modelSettings, engines: engines, library: library, onModels: { _ in }))),
-            ("settings-dictionary", tab(DictionaryTab(model: DictionaryModel(url: dictionaryURL)))),
-            ("settings-history", tab(HistoryTab(model: HistoryModel(store: store), onRetry: { _ in }))),
-            ("settings-about", tab(AboutTab())),
-            ("setup-to-do", checklist(done: false)),
-            ("setup-done", checklist(done: true)),
+            ("window-home", window(.home, height: 900)),
+            ("window-home-to-do", window(.home, done: false, height: 900)),
+            // Tall enough to show the download section below the list of models.
+            ("window-models", window(.models, height: 1400)),
+            ("window-dictionary", window(.dictionary)),
+            ("window-history", window(.history)),
+            ("window-settings", window(.settings)),
+            ("window-about", window(.about)),
         ]
     }
 

@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 import LucidCore
 
 /// Transcript cleanup through a local `llama-server`.

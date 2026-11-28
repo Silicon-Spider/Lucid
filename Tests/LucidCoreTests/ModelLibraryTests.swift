@@ -8,12 +8,12 @@ private func temporaryFolder() -> URL {
     return url
 }
 
-private func littleEndian<T: FixedWidthInteger>(_ value: T) -> Data {
+func littleEndian<T: FixedWidthInteger>(_ value: T) -> Data {
     withUnsafeBytes(of: value.littleEndian) { Data($0) }
 }
 
 /// The start of a whisper.cpp model file: the magic and the eleven header numbers.
-private func whisperHeader(mels: Int32 = 80) -> Data {
+func whisperHeader(mels: Int32 = 80) -> Data {
     var data = Data("lmgg".utf8)
     let header: [Int32] = [51866, 1500, 1280, 20, 32, 448, 1280, 20, 4, mels, 8]
     for value in header { data.append(littleEndian(value)) }
@@ -21,12 +21,12 @@ private func whisperHeader(mels: Int32 = 80) -> Data {
     return data
 }
 
-private func ggufString(_ text: String) -> Data {
+func ggufString(_ text: String) -> Data {
     littleEndian(UInt64(text.utf8.count)) + Data(text.utf8)
 }
 
-/// One GGUF metadata value. The numbers are GGUF's own type codes.
-private enum Value {
+/// One GGUF metadata value, for building test files. The numbers are GGUF's own type codes.
+enum GGUFValue {
     case string(String)
     case uint16(UInt16)
     case uint32(UInt32)
@@ -49,14 +49,14 @@ private enum Value {
 }
 
 /// The start of a GGUF file with the given metadata, like the one llama.cpp writes.
-private func gguf(version: UInt32 = 3, _ entries: [(String, Value)]) -> Data {
+func gguf(version: UInt32 = 3, _ entries: [(String, GGUFValue)]) -> Data {
     var data = Data("GGUF".utf8) + littleEndian(version) + littleEndian(UInt64(0)) + littleEndian(UInt64(entries.count))
     for (key, value) in entries { data += ggufString(key) + value.encoded }
     return data + Data(repeating: 0, count: 32)
 }
 
 /// A typical instruction model's metadata, with a long token list before the chat template.
-private func chatModel(architecture: String = "llama", extra: [(String, Value)] = []) -> Data {
+func chatModel(architecture: String = "llama", extra: [(String, GGUFValue)] = []) -> Data {
     gguf([
         ("general.architecture", .string(architecture)),
         ("general.name", .string("Test Model")),
@@ -303,10 +303,11 @@ func modelLibraryTests() {
             expectError(.builtIn("S1-mini by Superwhisper")) { try reopened.setStyle(.general, for: "s1-mini-q4_k_m.gguf") }
         }
 
-        test("removes an added model but never a built-in one") {
+        test("deletes any model, Lucid's own included, and says how much space it freed") {
             let folder = temporaryFolder()
             defer { try? FileManager.default.removeItem(at: folder) }
-            write(chatModel(), "s1-mini-q4_k_m.gguf", in: folder)
+            let builtIn = chatModel()
+            write(builtIn, "s1-mini-q4_k_m.gguf", in: folder)
             let source = temporaryFolder()
             defer { try? FileManager.default.removeItem(at: source) }
             let library = ModelLibrary(directory: folder)
@@ -315,9 +316,145 @@ func modelLibraryTests() {
             try library.remove("mine.gguf")
             expectEqual(library.models().map(\.fileName), ["s1-mini-q4_k_m.gguf"])
             expectEqual(library.style(of: "mine.gguf"), nil)
-            expectError(.builtIn("S1-mini by Superwhisper")) { try library.remove("s1-mini-q4_k_m.gguf") }
+            expectEqual(try library.remove("s1-mini-q4_k_m.gguf"), Int64(builtIn.count))
+            expectEqual(library.models(), [])
             expectError(.notFound("mine.gguf")) { try library.remove("mine.gguf") }
             expectError(.notFound("models.json")) { try library.remove("models.json") }
+            expectError(.notFound("../outside.gguf")) { try library.remove("../outside.gguf") }
+        }
+
+        // Making a link needs special rights on Windows, so this is checked on macOS and Linux.
+        #if !os(Windows)
+        test("deletes a link, never the model it points to") {
+            let folder = temporaryFolder()
+            let elsewhere = temporaryFolder()
+            defer {
+                try? FileManager.default.removeItem(at: folder)
+                try? FileManager.default.removeItem(at: elsewhere)
+            }
+            let target = write(chatModel(), "kept.gguf", in: elsewhere)
+            try FileManager.default.createSymbolicLink(
+                at: folder.appendingPathComponent("linked.gguf"), withDestinationURL: target
+            )
+            let library = ModelLibrary(directory: folder)
+            expectEqual(library.models().map(\.fileName), ["linked.gguf"])
+            try library.remove("linked.gguf")
+            expectEqual(library.models(), [])
+            expectTrue(FileManager.default.fileExists(atPath: target.path), "the linked model was deleted")
+        }
+        #endif
+
+        test("gives a model a new name, and keeps it") {
+            let folder = temporaryFolder()
+            defer { try? FileManager.default.removeItem(at: folder) }
+            write(chatModel(), "s1-mini-q4_k_m.gguf", in: folder)
+            write(chatModel(), "Llama-3.2-3B-Instruct-Q4_K_M.gguf", in: folder)
+            write(whisperHeader(), "ggml-small.en.bin", in: folder)
+            let library = ModelLibrary(directory: folder)
+            try library.setStyle(.general, for: "Llama-3.2-3B-Instruct-Q4_K_M.gguf")
+
+            expectEqual(try library.rename("Llama-3.2-3B-Instruct-Q4_K_M.gguf", to: "  Work\temails \n llama "), "Work emails llama")
+            expectEqual(try library.rename("s1-mini-q4_k_m.gguf", to: "Quick cleanup"), "Quick cleanup")
+
+            let reopened = ModelLibrary(directory: folder)
+            expectEqual(reopened.models().map(\.name), ["Quick cleanup", "ggml-small.en", "Work emails llama"])
+            expectEqual(reopened.models().map(\.fileName), ["s1-mini-q4_k_m.gguf", "ggml-small.en.bin", "Llama-3.2-3B-Instruct-Q4_K_M.gguf"])
+            // Renaming changes nothing else about the model.
+            expectEqual(reopened.models().last?.style, .general)
+            expectTrue(reopened.models().first?.isBuiltIn == true)
+            expectEqual(reopened.plan(for: ModelChoices(light: "Llama-3.2-3B-Instruct-Q4_K_M.gguf")).light.fileName, "Llama-3.2-3B-Instruct-Q4_K_M.gguf")
+            expectTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("Llama-3.2-3B-Instruct-Q4_K_M.gguf").path))
+        }
+
+        test("an empty name, or the original one, puts the original name back") {
+            let folder = temporaryFolder()
+            defer { try? FileManager.default.removeItem(at: folder) }
+            write(chatModel(), "s1-mini-q4_k_m.gguf", in: folder)
+            write(whisperHeader(), "ggml-small.en.bin", in: folder)
+            let library = ModelLibrary(directory: folder)
+            try library.rename("s1-mini-q4_k_m.gguf", to: "Mine")
+            try library.rename("ggml-small.en.bin", to: "Small")
+            expectEqual(try library.rename("s1-mini-q4_k_m.gguf", to: "   "), "S1-mini by Superwhisper")
+            expectEqual(try library.rename("ggml-small.en.bin", to: "ggml-small.en"), "ggml-small.en")
+            expectEqual(library.models().map(\.name), ["S1-mini by Superwhisper", "ggml-small.en"])
+            expectEqual(ModelLibrary.defaultName(for: "s1-mini-q4_k_m.gguf"), "S1-mini by Superwhisper")
+            expectEqual(ModelLibrary.defaultName(for: "ggml-small.en.bin"), "ggml-small.en")
+        }
+
+        test("refuses a name that is taken, too long, or for a model that is not there") {
+            let folder = temporaryFolder()
+            defer { try? FileManager.default.removeItem(at: folder) }
+            write(chatModel(), "s1-mini-q4_k_m.gguf", in: folder)
+            write(chatModel(), "first.gguf", in: folder)
+            write(chatModel(), "second.gguf", in: folder)
+            let library = ModelLibrary(directory: folder)
+            try library.rename("first.gguf", to: "Favourite")
+
+            expectError(.nameTaken("favourite")) { try library.rename("second.gguf", to: "favourite") }
+            expectError(.nameTaken("s1-mini by superwhisper")) { try library.rename("second.gguf", to: "s1-mini by superwhisper") }
+            // The first model's original name is still spoken for, though it now shows another.
+            expectError(.nameTaken("first")) { try library.rename("second.gguf", to: "first") }
+            expectError(.nameTooLong(60)) { try library.rename("second.gguf", to: String(repeating: "x", count: 61)) }
+            expectEqual(try library.rename("second.gguf", to: String(repeating: "x", count: 60)).count, 60)
+            expectError(.notFound("gone.gguf")) { try library.rename("gone.gguf", to: "Anything") }
+            expectError(.notFound("models.json")) { try library.rename("models.json", to: "Anything") }
+            // Keeping its own name, in different capitals, is allowed.
+            expectEqual(try library.rename("first.gguf", to: "FAVOURITE"), "FAVOURITE")
+        }
+
+        test("forgets a model's name when the model is deleted or replaced") {
+            let folder = temporaryFolder()
+            let source = temporaryFolder()
+            defer {
+                try? FileManager.default.removeItem(at: folder)
+                try? FileManager.default.removeItem(at: source)
+            }
+            let original = write(chatModel(), "mine.gguf", in: source)
+            let library = ModelLibrary(directory: folder)
+            _ = try library.add(from: original)
+            try library.rename("mine.gguf", to: "Old name")
+            try library.remove("mine.gguf")
+            expectEqual(try library.add(from: original).model.name, "mine")
+            expectEqual(library.models().map(\.name), ["mine"])
+
+            // A file put back by hand, outside Lucid, is a new model too.
+            try library.rename("mine.gguf", to: "Second name")
+            try FileManager.default.removeItem(at: folder.appendingPathComponent("mine.gguf"))
+            expectEqual(try library.add(from: original).model.name, "mine")
+            expectEqual(library.models().map(\.name), ["mine"])
+        }
+
+        test("reads a models.json written before models could be renamed") {
+            let folder = temporaryFolder()
+            defer { try? FileManager.default.removeItem(at: folder) }
+            write(chatModel(), "old.gguf", in: folder)
+            write(Data(#"{"styles":{"old.gguf":"s1"}}"#.utf8), "models.json", in: folder)
+            let library = ModelLibrary(directory: folder)
+            expectEqual(library.models().first?.style, .s1)
+            try library.rename("old.gguf", to: "Renamed")
+            expectEqual(library.models().first?.style, .s1)
+            expectEqual(library.models().first?.name, "Renamed")
+            write(Data(#"{"names":{"old.gguf":"Only a name"}}"#.utf8), "models.json", in: folder)
+            expectEqual(library.models().first?.name, "Only a name")
+            expectEqual(library.models().first?.style, .general)
+        }
+
+        test("lists and discards unfinished downloads") {
+            let folder = temporaryFolder()
+            defer { try? FileManager.default.removeItem(at: folder) }
+            write(Data(repeating: 1, count: 300), "big-model.gguf.part", in: folder)
+            write(Data(repeating: 1, count: 100), "ggml-small.en.bin.part", in: folder)
+            write(Data(repeating: 1, count: 50), "copying.gguf.copy.part", in: folder)
+            write(Data(), "empty.gguf.part", in: folder)
+            let library = ModelLibrary(directory: folder)
+            expectEqual(library.partialDownloads(), [
+                PartialDownload(fileName: "big-model.gguf", bytes: 300),
+                PartialDownload(fileName: "ggml-small.en.bin", bytes: 100),
+            ])
+            try library.discardPartial(of: "big-model.gguf")
+            expectEqual(library.partialDownloads().map(\.fileName), ["ggml-small.en.bin"])
+            expectError(.notFound("big-model.gguf")) { try library.discardPartial(of: "big-model.gguf") }
+            expectError(.notFound("../ggml-small.en.bin")) { try library.discardPartial(of: "../ggml-small.en.bin") }
         }
     }
 
@@ -361,6 +498,41 @@ func modelLibraryTests() {
             let plan = ModelLibrary.plan(for: ModelChoices(medium: "s1-mini-q8_0.gguf"), installed: [whisper, s1, s1Copy])
             expectEqual(plan.medium, nil)
             expectEqual(plan.cleanup(for: .medium), EngineConfig.s1Mini)
+        }
+
+        test("uses another installed model when Lucid's own is gone too") {
+            let plan = ModelLibrary.plan(for: ModelChoices(speech: "deleted.bin"), installed: [small, qwen])
+            expectEqual(plan.speech, "ggml-small.en.bin")
+            expectEqual(plan.light, EngineConfig.general)
+            let none = ModelLibrary.plan(for: ModelChoices(), installed: [])
+            expectEqual(none.speech, EngineConfig.defaultSpeechModel)
+            expectEqual(none.light, EngineConfig.s1Mini)
+        }
+
+        test("says what deleting a model changes") {
+            let installed = [whisper, small, s1, qwen, llama]
+            let choices = ModelChoices(speech: "ggml-small.en.bin", medium: "llama.gguf")
+            expectEqual(
+                ModelLibrary.effectsOfRemoving("ggml-small.en.bin", choices: choices, installed: installed),
+                RemovalEffects(speech: .switches(to: EngineConfig.defaultSpeechModel))
+            )
+            expectEqual(
+                ModelLibrary.effectsOfRemoving("llama.gguf", choices: choices, installed: installed),
+                RemovalEffects(medium: .switches(to: EngineConfig.general.fileName))
+            )
+            expectTrue(ModelLibrary.effectsOfRemoving(EngineConfig.defaultSpeechModel, choices: choices, installed: installed).isEmpty)
+            expectEqual(
+                ModelLibrary.effectsOfRemoving(EngineConfig.s1Mini.fileName, choices: ModelChoices(), installed: [whisper, s1]),
+                RemovalEffects(light: .nothingLeft)
+            )
+            expectEqual(
+                ModelLibrary.effectsOfRemoving(EngineConfig.general.fileName, choices: ModelChoices(), installed: [whisper, qwen]),
+                RemovalEffects(light: .nothingLeft, medium: .nothingLeft)
+            )
+            expectEqual(
+                ModelLibrary.effectsOfRemoving(EngineConfig.defaultSpeechModel, choices: ModelChoices(), installed: [whisper, s1]),
+                RemovalEffects(speech: .nothingLeft)
+            )
         }
 
         test("forgetting a model clears every choice of it") {

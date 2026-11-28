@@ -1,0 +1,3 @@
+# Keep line endings as they are in the repository on every system, Windows included.
+* text=auto eol=lf
+*.png binary

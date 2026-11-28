@@ -54,6 +54,19 @@ final class EngineManager: ObservableObject {
         ModelLibrary.standard.plan(for: choices).medium != nil
     }
 
+    /// The model files the engines need that are not in the models folder yet.
+    var missingModelFiles: [String] {
+        [config.speechModelURL, config.cleanupModelURL]
+            .filter { !FileManager.default.fileExists(atPath: $0.path) }
+            .map(\.lastPathComponent)
+    }
+
+    /// True when whisper.cpp or llama.cpp is not installed, which only `scripts/setup.sh` can fix.
+    var enginesMissing: Bool {
+        !FileManager.default.isExecutableFile(atPath: config.whisperServer.path)
+            || !FileManager.default.isExecutableFile(atPath: config.llamaServer.path)
+    }
+
     func start() async {
         let starting = supervisor
         status = .starting
@@ -74,12 +87,16 @@ final class EngineManager: ObservableObject {
     }
 
     /// Restarts the engines if the level, the user's model choices or the models folder now
-    /// call for different model files. Does nothing when they would load the same files.
+    /// call for different model files. Starts them if the files they were missing have arrived.
     func update(choices newChoices: ModelChoices? = nil, level newLevel: CleanupLevel? = nil) async {
         if let newChoices { choices = newChoices }
         if let newLevel { level = newLevel }
         let wanted = EngineConfig.standard(plan: library.plan(for: choices), level: level)
-        guard wanted != config else { return }
+        guard wanted != config else {
+            // The same files, but one that was missing may just have been downloaded.
+            if case .setupNeeded = status, wanted.missing().isEmpty { await start() }
+            return
+        }
         // Swap before waiting, so an update that arrives meanwhile sees the new engines.
         config = wanted
         let old = supervisor
@@ -102,6 +119,13 @@ final class EngineManager: ObservableObject {
             done.signal()
         }
         _ = done.wait(timeout: .now() + 4)
+    }
+
+    /// What the speech engine hears in the recording so far, to show while the user is still
+    /// speaking. Nil when it cannot say: a preview is never worth an error or a restart.
+    func preview(wav: Data, prompt: String) async -> String? {
+        guard status == .ready, let transcriber = try? await supervisor.transcriber() else { return nil }
+        return try? await transcriber.transcribe(wav: wav, prompt: prompt)
     }
 
     /// Turns a recording into cleaned text. Restarts an engine first if one has stopped.

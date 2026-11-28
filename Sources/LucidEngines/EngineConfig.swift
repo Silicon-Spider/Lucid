@@ -39,27 +39,66 @@ public struct EngineConfig: Equatable, Sendable {
         supportDirectory.appendingPathComponent("models")
     }
 
-    /// Looks in Homebrew's folder on Apple Silicon, then on Intel.
-    static func findBinary(_ name: String) -> URL {
-        let folders = ["/opt/homebrew/bin", "/usr/local/bin"]
-        for folder in folders {
-            let url = URL(fileURLWithPath: folder).appendingPathComponent(name)
-            if FileManager.default.isExecutableFile(atPath: url.path) { return url }
+    /// Where an engine can be put by hand: an `engines` folder beside the models. On Windows
+    /// and Linux, where there is no Homebrew, this is where Lucid expects them, each in a
+    /// folder of its own. They cannot share one: both come with files of the same names.
+    public static var enginesDirectory: URL {
+        supportDirectory.appendingPathComponent("engines")
+    }
+
+    /// Looks for a program anywhere in the `engines` folder, up to three folders deep, so an
+    /// engine's download can be unzipped there as it comes.
+    public static func findInEngines(_ file: String, under folder: URL = enginesDirectory) -> URL? {
+        guard let walker = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: nil) else { return nil }
+        var found: [URL] = []
+        for case let url as URL in walker {
+            if walker.level > 3 {
+                walker.skipDescendants()
+            } else if url.lastPathComponent == file, FileManager.default.isExecutableFile(atPath: url.path) {
+                found.append(url)
+            }
         }
-        return URL(fileURLWithPath: folders[0]).appendingPathComponent(name)
+        // The same answer every time, whatever order the system lists folders in.
+        return found.min { $0.path < $1.path }
+    }
+
+    /// Where engine logs are written: `~/Library/Logs/Lucid` on a Mac, and a `logs` folder
+    /// beside the models elsewhere.
+    public static var logsDirectory: URL {
+        #if os(macOS)
+        return FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Logs/Lucid")
+        #else
+        return supportDirectory.appendingPathComponent("logs")
+        #endif
+    }
+
+    /// Finds an engine's program. On a Mac that is Homebrew's folder, on Apple Silicon then on
+    /// Intel. Everywhere, Lucid's own `engines` folder and the PATH are also searched. When the
+    /// engine is nowhere, the answer is where Lucid expects it, for the message that says so.
+    static func findBinary(_ name: String) -> URL {
+        let file = Platform.programFile(name)
+        var candidates: [URL] = []
+        #if os(macOS)
+        candidates += ["/opt/homebrew/bin", "/usr/local/bin"].map { URL(fileURLWithPath: $0).appendingPathComponent(file) }
+        #endif
+        // Where Lucid says to put an engine that is nowhere to be found.
+        candidates.append(enginesDirectory.appendingPathComponent(name).appendingPathComponent(file))
+        if let found = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0.path) }) {
+            return found
+        }
+        return findInEngines(file) ?? Platform.findOnPath(name) ?? candidates[0]
     }
 
     /// The engines from Homebrew and the models in Lucid's models folder. `speech` is the file
     /// name of the speech model.
     public static func standard(speech: String = defaultSpeechModel, cleanup: CleanupModel = s1Mini) -> EngineConfig {
         let support = supportDirectory
-        let logs = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Logs/Lucid")
         return EngineConfig(
             whisperServer: findBinary("whisper-server"),
             llamaServer: findBinary("llama-server"),
             modelsDirectory: modelsDirectory,
-            logsDirectory: logs,
+            logsDirectory: logsDirectory,
             supportDirectory: support,
             speechModel: speech,
             cleanupModel: cleanup

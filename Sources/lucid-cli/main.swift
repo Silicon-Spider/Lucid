@@ -1,4 +1,5 @@
 import Foundation
+import LucidApp
 import LucidCore
 import LucidEngines
 
@@ -46,9 +47,17 @@ let usage = """
 lucid-cli: command-line access to Lucid's dictation pipeline
 
   lucid-cli doctor                      check that the engines and models are installed
+  lucid-cli folder models|engines|logs  print where Lucid keeps its models, engines or logs
+  lucid-cli window                      open Lucid's window in a browser: models, dictionary,
+                                        history and settings. It stays open until you press Ctrl+C.
   lucid-cli models                      list the models in Lucid's models folder
   lucid-cli add-model [--style s1|general] <file>
                                         copy a speech (.bin) or cleanup (.gguf) model into it
+  lucid-cli download [--style s1|general] <model or link> [file]
+                                        list a Hugging Face model's files, or download one
+  lucid-cli remove-model <file>         delete a model, or an unfinished download of one
+  lucid-cli rename-model <file> <name>  give a model your own name. An empty name puts the
+                                        original back. The file keeps its name.
   lucid-cli clean [options] <text>      clean up a transcript given as text
   lucid-cli transcribe <file.wav>...    speech to text only
   lucid-cli dictate [options] <file.wav>...
@@ -157,8 +166,53 @@ func runDoctor(_ arguments: Arguments) throws -> Int32 {
     }
     print("\nNot installed:")
     for item in missing { print("  - \(item)") }
+    #if os(Windows)
+    print("\nRun scripts\\setup.ps1 in PowerShell to install what is missing.")
+    #elseif os(macOS)
     print("\nRun scripts/setup.sh to install what is missing.")
+    #else
+    print("\nPut whisper-server and llama-server on the PATH, or in folders of their own inside")
+    print("\(EngineConfig.enginesDirectory.path), and download the models with lucid-cli download.")
+    #endif
     return 1
+}
+
+func runFolder(_ arguments: Arguments) throws -> Int32 {
+    switch arguments.positional.first {
+    case "models": print(EngineConfig.modelsDirectory.path)
+    case "engines": print(EngineConfig.enginesDirectory.path)
+    case "logs": print(EngineConfig.logsDirectory.path)
+    default: throw CLIError("folder needs one of: models, engines, logs")
+    }
+    return 0
+}
+
+/// Serves Lucid's window without the dictation key, the microphone or the pill, for systems
+/// where the app itself does not run. The address it prints works only on this computer.
+func runWindow() async throws -> Int32 {
+    let desk = try Desk(shell: HeadlessShell(), tracksProcesses: false)
+    desk.start()
+    print("Lucid's window is open at:\n\n  \(desk.windowAddress())\n")
+    print("Open that address in a browser on this computer. Press Ctrl+C to close it.")
+    // When the output is not a terminal it is held back until there is more of it. Send it now.
+    fflush(stdout)
+
+    #if !os(Windows)
+    // Ctrl+C must stop the engines too, or they would be left running.
+    signal(SIGINT, SIG_IGN)
+    signal(SIGTERM, SIG_IGN)
+    let sources = [SIGINT, SIGTERM].map { number -> DispatchSourceSignal in
+        let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
+        source.setEventHandler {
+            desk.stop()
+            exit(0)
+        }
+        source.resume()
+        return source
+    }
+    defer { sources.forEach { $0.cancel() } }
+    #endif
+    while true { try await Task.sleep(nanoseconds: 3_600_000_000_000) }
 }
 
 func runModels() -> Int32 {
@@ -172,13 +226,54 @@ func runModels() -> Int32 {
         if matching.isEmpty { print("  none") }
         for model in matching {
             var notes = [formatter.string(fromByteCount: model.bytes)]
+            if model.name != ModelLibrary.defaultName(for: model.fileName) { notes.insert("named \"\(model.name)\"", at: 0) }
             if model.isBuiltIn { notes.append("built in") }
             if let style = model.style { notes.append("\(style.rawValue) prompt") }
             print("  \(model.fileName)  (\(notes.joined(separator: ", ")))")
         }
         print("")
     }
+    let partials = library.partialDownloads()
+    if !partials.isEmpty {
+        print("Unfinished downloads")
+        for partial in partials {
+            print("  \(partial.fileName)  (\(formatter.string(fromByteCount: partial.bytes)) so far)")
+        }
+        print("")
+    }
     print("Folder: \(library.directory.path)")
+    return 0
+}
+
+func runRenameModel(_ arguments: Arguments) throws -> Int32 {
+    guard arguments.positional.count >= 2, let file = arguments.positional.first else {
+        throw CLIError("rename-model needs a model's file name and its new name. See lucid-cli models.")
+    }
+    let wanted = arguments.positional.dropFirst().joined(separator: " ")
+    let name = try ModelLibrary.standard.rename(file, to: wanted)
+    if name == ModelLibrary.defaultName(for: file) {
+        print("\(file) has its original name again: \(name).")
+    } else {
+        print("\(file) is now called \(name).")
+    }
+    return 0
+}
+
+func runRemoveModel(_ arguments: Arguments) throws -> Int32 {
+    guard arguments.positional.count == 1, let name = arguments.positional.first else {
+        throw CLIError("remove-model needs the file name of one model. See lucid-cli models.")
+    }
+    let library = ModelLibrary.standard
+    let formatter = ByteCountFormatter()
+    formatter.countStyle = .file
+    do {
+        let freed = try library.remove(name)
+        print("Deleted \(name), freeing \(formatter.string(fromByteCount: freed)).")
+    } catch ModelError.notFound {
+        guard let bytes = library.partialBytes(of: name) else { throw ModelError.notFound(name) }
+        try library.discardPartial(of: name)
+        print("Deleted the unfinished download of \(name), freeing \(formatter.string(fromByteCount: bytes)).")
+    }
     return 0
 }
 
@@ -196,8 +291,64 @@ func runAddModel(_ arguments: Arguments) throws -> Int32 {
         print("Try it with: lucid-cli eval --model \(model.fileName)")
     }
     if let warning = added.warning { print("Note: \(warning)") }
-    print("Choose it for the app in Lucid's Settings, Models.")
+    #if os(macOS)
+    print("Choose it for the app under Models in Lucid's window.")
+    #endif
     return 0
+}
+
+func runDownload(_ arguments: Arguments) async throws -> Int32 {
+    guard let text = arguments.positional.first, arguments.positional.count <= 2 else {
+        throw CLIError("download needs a Hugging Face model, such as ggerganov/whisper.cpp, or a link to one")
+    }
+    guard var reference = HuggingFace.parse(text) else {
+        throw CLIError("'\(text)' is not a Hugging Face model name or link")
+    }
+    if arguments.positional.count == 2 { reference.path = arguments.positional[1] }
+    let formatter = ByteCountFormatter()
+    formatter.countStyle = .file
+    let size = { (bytes: Int64?) in bytes.map { formatter.string(fromByteCount: $0) } ?? "size unknown" }
+
+    let files = try await HuggingFace().modelFiles(in: reference)
+    guard reference.path != nil, let file = files.first else {
+        print("Model files in \(reference.repo):")
+        for file in files { print("  \(file.path)  (\(file.kind.rawValue), \(size(file.bytes)))") }
+        print("\nDownload one with: lucid-cli download \(reference.repo) <file>")
+        return 0
+    }
+
+    print("Downloading \(file.fileName) (\(size(file.bytes))) from \(reference.repo)")
+    let lastPercent = Counter()
+    let added = try await ModelLibrary.standard.download(file, style: try promptStyle(arguments)) { received, total in
+        guard let total, total > 0 else { return }
+        let percent = Int(received * 100 / total)
+        if lastPercent.advance(to: percent) {
+            FileHandle.standardError.write(Data("\r  \(percent)%".utf8))
+        }
+    }
+    FileHandle.standardError.write(Data("\n".utf8))
+    let model = added.model
+    print("Added \(model.fileName) as a \(model.kind == .speech ? "speech" : "cleanup") model.")
+    if let warning = added.warning { print("Note: \(warning)") }
+    #if os(macOS)
+    print("Choose it for the app under Models in Lucid's window.")
+    #endif
+    return 0
+}
+
+/// The last percentage printed, shared with the download's progress callback.
+final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = -1
+
+    /// True when `percent` is new, so it is worth printing.
+    func advance(to percent: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard percent > value else { return false }
+        value = percent
+        return true
+    }
 }
 
 func runClean(_ arguments: Arguments) async throws -> Int32 {
@@ -353,8 +504,13 @@ func run() async throws -> Int32 {
     }
     switch command {
     case "doctor": return try runDoctor(arguments)
+    case "folder": return try runFolder(arguments)
+    case "window": return try await runWindow()
     case "models": return runModels()
     case "add-model": return try runAddModel(arguments)
+    case "download": return try await runDownload(arguments)
+    case "remove-model": return try runRemoveModel(arguments)
+    case "rename-model": return try runRenameModel(arguments)
     case "clean": return try await runClean(arguments)
     case "transcribe": return try await runDictate(arguments, transcribeOnly: true)
     case "dictate": return try await runDictate(arguments, transcribeOnly: false)

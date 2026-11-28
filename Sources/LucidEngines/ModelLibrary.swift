@@ -13,7 +13,8 @@ public enum ModelKind: String, Codable, CaseIterable, Sendable {
 public struct InstalledModel: Equatable, Identifiable, Sendable {
     public var fileName: String
     public var kind: ModelKind
-    /// What to call the model. For a model the user added, its file name without the extension.
+    /// What to call the model: the name the user gave it, or else Lucid's name for one of its
+    /// own models, or else the file name without the extension.
     public var name: String
     /// The prompt format. Cleanup models only.
     public var style: PromptStyle?
@@ -80,6 +81,43 @@ public struct ModelPlan: Equatable, Sendable {
     }
 }
 
+/// What deleting a model changes. Each use the model had says what takes its place.
+public struct RemovalEffects: Equatable, Sendable {
+    public enum Change: Equatable, Sendable {
+        /// Another installed model, by file name, takes over.
+        case switches(to: String)
+        /// No other installed model can.
+        case nothingLeft
+    }
+
+    public var speech: Change?
+    public var light: Change?
+    public var medium: Change?
+
+    public init(speech: Change? = nil, light: Change? = nil, medium: Change? = nil) {
+        self.speech = speech
+        self.light = light
+        self.medium = medium
+    }
+
+    /// True when the model was not in use.
+    public var isEmpty: Bool { speech == nil && light == nil && medium == nil }
+}
+
+/// What an unfinished download left in the models folder.
+public struct PartialDownload: Equatable, Identifiable, Sendable {
+    /// The name the model will have when it is complete.
+    public var fileName: String
+    public var bytes: Int64
+
+    public var id: String { fileName }
+
+    public init(fileName: String, bytes: Int64) {
+        self.fileName = fileName
+        self.bytes = bytes
+    }
+}
+
 /// A model that comes with Lucid.
 public struct BuiltInModel: Sendable {
     public let fileName: String
@@ -91,7 +129,8 @@ public struct BuiltInModel: Sendable {
 /// The models in Lucid's models folder: the built-in ones that `scripts/setup.sh` downloads,
 /// and any the user added.
 ///
-/// The prompt format of each added cleanup model is kept in `models.json` in the same folder.
+/// The prompt format of each added cleanup model, and any name the user gave a model, are kept
+/// in `models.json` in the same folder.
 public struct ModelLibrary: Sendable {
     public let directory: URL
 
@@ -119,7 +158,8 @@ public struct ModelLibrary: Sendable {
     public func models() -> [InstalledModel] {
         let files = FileManager.default
         guard let names = try? files.contentsOfDirectory(atPath: directory.path) else { return [] }
-        let styles = registry().styles
+        let saved = registry()
+        let styles = saved.styles
         var builtIn: [InstalledModel] = []
         var added: [InstalledModel] = []
         for name in names where Self.mayBeModel(name) {
@@ -130,13 +170,18 @@ public struct ModelLibrary: Sendable {
             let bytes = (attributes[.size] as? NSNumber)?.int64Value ?? 0
             if let known = Self.builtIn.first(where: { $0.fileName == name }) {
                 builtIn.append(InstalledModel(
-                    fileName: name, kind: known.kind, name: known.name, style: known.style, isBuiltIn: true, bytes: bytes
+                    fileName: name,
+                    kind: known.kind,
+                    name: saved.names[name] ?? known.name,
+                    style: known.style,
+                    isBuiltIn: true,
+                    bytes: bytes
                 ))
             } else if let kind = ModelFile.kind(of: url) {
                 added.append(InstalledModel(
                     fileName: name,
                     kind: kind,
-                    name: Self.displayName(name),
+                    name: saved.names[name] ?? Self.displayName(name),
                     style: kind == .cleanup ? styles[name] ?? Self.suggestedStyle(name) : nil,
                     isBuiltIn: false,
                     bytes: bytes
@@ -161,7 +206,8 @@ public struct ModelLibrary: Sendable {
     // MARK: Choosing
 
     /// The files the engines should load for the user's choices. A choice that names a model
-    /// that is not installed falls back to the built-in model, so dictation keeps working.
+    /// that is not installed falls back to the built-in model, and if that is gone too, to any
+    /// installed model of the same kind, so dictation keeps working.
     public func plan(for choices: ModelChoices) -> ModelPlan {
         Self.plan(for: choices, installed: models())
     }
@@ -171,14 +217,40 @@ public struct ModelLibrary: Sendable {
             guard let fileName else { return nil }
             return installed.first { $0.fileName == fileName && $0.kind == kind }
         }
-        let speech = find(choices.speech, .speech)?.fileName ?? EngineConfig.defaultSpeechModel
-        let light = find(choices.light, .cleanup)?.cleanupModel ?? EngineConfig.s1Mini
+        let speech = find(choices.speech, .speech)?.fileName
+            ?? find(EngineConfig.defaultSpeechModel, .speech)?.fileName
+            ?? installed.first { $0.kind == .speech }?.fileName
+            ?? EngineConfig.defaultSpeechModel
+        let light = find(choices.light, .cleanup)?.cleanupModel
+            ?? find(EngineConfig.s1Mini.fileName, .cleanup)?.cleanupModel
+            ?? installed.first { $0.kind == .cleanup }?.cleanupModel
+            ?? EngineConfig.s1Mini
         // Only Lucid's own prompt has a Medium setting. The S1-mini format cannot tighten wording.
         let medium = [choices.medium, EngineConfig.general.fileName]
             .compactMap { find($0, .cleanup) }
             .first { $0.style == .general }?
             .cleanupModel
         return ModelPlan(speech: speech, light: light, medium: medium)
+    }
+
+    /// What deleting a model would change, so the user can be told before they confirm.
+    public static func effectsOfRemoving(
+        _ fileName: String, choices: ModelChoices, installed: [InstalledModel]
+    ) -> RemovalEffects {
+        let before = plan(for: choices, installed: installed)
+        let rest = installed.filter { $0.fileName != fileName }
+        var remaining = choices
+        remaining.forget(fileName)
+        let after = plan(for: remaining, installed: rest)
+        func change(to next: String?) -> RemovalEffects.Change {
+            guard let next, rest.contains(where: { $0.fileName == next }) else { return .nothingLeft }
+            return .switches(to: next)
+        }
+        var effects = RemovalEffects()
+        if before.speech == fileName { effects.speech = change(to: after.speech) }
+        if before.light.fileName == fileName { effects.light = change(to: after.light.fileName) }
+        if before.medium?.fileName == fileName { effects.medium = change(to: after.medium?.fileName) }
+        return effects
     }
 
     // MARK: Changing
@@ -198,8 +270,112 @@ public struct ModelLibrary: Sendable {
     /// file is never taken for a model. On APFS, a copy within one disk is a clone that takes
     /// no extra space.
     public func add(from picked: URL, as kind: ModelKind? = nil, style: PromptStyle? = nil) throws -> Added {
-        let source = picked.resolvingSymlinksInPath()
         let name = picked.lastPathComponent
+        let checked = try check(picked.resolvingSymlinksInPath(), name: name, kind: kind)
+
+        let files = FileManager.default
+        let destination = directory.appendingPathComponent(name)
+        if files.fileExists(atPath: destination.path) { throw ModelError.alreadyInstalled(name) }
+        // Not the `.part` name downloads use, so a download of the same file is left alone.
+        let partial = directory.appendingPathComponent(name + ".copy.part")
+        do {
+            try files.createDirectory(at: directory, withIntermediateDirectories: true)
+            try? files.removeItem(at: partial)
+            try files.copyItem(at: picked.resolvingSymlinksInPath(), to: partial)
+            try files.moveItem(at: partial, to: destination)
+        } catch {
+            try? files.removeItem(at: partial)
+            throw ModelError.copyFailed(error.localizedDescription)
+        }
+        return installed(name, checked, style: style)
+    }
+
+    /// Downloads a model from Hugging Face, checks it as `add` does, and puts it in the models
+    /// folder. A download that stops early is kept as a `.part` file, and the next download of
+    /// the same file continues from it. `progress` gets the bytes so far and the full size.
+    public func download(
+        _ remote: RemoteModel,
+        from hub: HuggingFace = HuggingFace(),
+        style: PromptStyle? = nil,
+        progress: @escaping @Sendable (Int64, Int64?) -> Void = { _, _ in }
+    ) async throws -> Added {
+        let name = remote.fileName
+        guard Self.mayBeModel(name), !name.hasSuffix(".part") else { throw ModelError.notAModel }
+        let files = FileManager.default
+        let destination = directory.appendingPathComponent(name)
+        if files.fileExists(atPath: destination.path) { throw ModelError.alreadyInstalled(name) }
+        do {
+            try files.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            throw DownloadError.cannotSave
+        }
+        let partial = partialURL(for: name)
+        try checkSpace(for: remote, partial: partial)
+
+        let download = FileDownload(
+            url: hub.downloadURL(for: remote), partial: partial, expectedBytes: remote.bytes, progress: progress
+        )
+        do {
+            try await download.run()
+        } catch {
+            // Keep what arrived, to continue from next time, but not an empty file.
+            if partialBytes(of: name) == nil { try? files.removeItem(at: partial) }
+            if let failure = error as? DownloadError, case .http(let code) = failure {
+                if code == 401 || code == 403 { throw DownloadError.needsAccess(remote.repo) }
+                if code == 404 { throw DownloadError.fileNotFound(remote.path) }
+            }
+            throw error
+        }
+
+        // The whole file is here. Check it like one the user added, then put it in place.
+        do {
+            let checked = try check(partial, name: name, kind: remote.kind)
+            if files.fileExists(atPath: destination.path) { throw ModelError.alreadyInstalled(name) }
+            do {
+                try files.moveItem(at: partial, to: destination)
+            } catch {
+                throw ModelError.copyFailed(error.localizedDescription)
+            }
+            return installed(name, checked, style: style)
+        } catch {
+            try? files.removeItem(at: partial)
+            throw error
+        }
+    }
+
+    /// How much of a file an earlier download left behind, if any.
+    public func partialBytes(of fileName: String) -> Int64? {
+        let path = partialURL(for: fileName).path
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: path))?[.size] as? NSNumber,
+              size.int64Value > 0 else { return nil }
+        return size.int64Value
+    }
+
+    private func partialURL(for fileName: String) -> URL {
+        directory.appendingPathComponent(fileName + ".part")
+    }
+
+    /// Refuses to start a download that cannot fit, leaving room for the system.
+    private func checkSpace(for remote: RemoteModel, partial: URL) throws {
+        #if os(macOS)
+        guard let size = remote.bytes,
+              let values = try? directory.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
+              let free = values.volumeAvailableCapacityForImportantUsage else { return }
+        let needed = size - (partialBytes(of: remote.fileName) ?? 0)
+        if needed + 200_000_000 > free { throw DownloadError.notEnoughSpace(needed: needed, free: free) }
+        #endif
+    }
+
+    /// The result of checking a model file before it is put in the models folder.
+    private struct Checked {
+        let format: ModelFormat
+        /// Set when the file is one of Lucid's own models.
+        let known: BuiltInModel?
+        let warning: String?
+    }
+
+    /// Checks that a file is a usable model of the right kind, to be called `name`.
+    private func check(_ source: URL, name: String, kind: ModelKind?) throws -> Checked {
         if name.hasSuffix(".part") { throw ModelError.damaged }
         guard Self.mayBeModel(name) else { throw ModelError.notAModel }
 
@@ -223,44 +399,39 @@ public struct ModelLibrary: Sendable {
                     + "If its replies are unusable, Lucid falls back to its rules."
             }
         }
+        return Checked(format: format, known: known, warning: warning)
+    }
 
-        let files = FileManager.default
+    /// Describes a model just put in the folder, and saves its prompt format.
+    private func installed(_ name: String, _ checked: Checked, style: PromptStyle?) -> Added {
         let destination = directory.appendingPathComponent(name)
-        if files.fileExists(atPath: destination.path) { throw ModelError.alreadyInstalled(name) }
-
-        let partial = directory.appendingPathComponent(name + ".part")
-        do {
-            try files.createDirectory(at: directory, withIntermediateDirectories: true)
-            try? files.removeItem(at: partial)
-            try files.copyItem(at: source, to: partial)
-            try files.moveItem(at: partial, to: destination)
-        } catch {
-            try? files.removeItem(at: partial)
-            throw ModelError.copyFailed(error.localizedDescription)
-        }
-
-        let bytes = ((try? files.attributesOfItem(atPath: destination.path))?[.size] as? NSNumber)?.int64Value ?? 0
-        if let known {
+        let bytes = ((try? FileManager.default.attributesOfItem(atPath: destination.path))?[.size] as? NSNumber)?
+            .int64Value ?? 0
+        var saved = registry()
+        // A name given to an earlier file of the same name does not belong to this one.
+        var changed = saved.names.removeValue(forKey: name) != nil
+        defer { if changed { try? save(saved) } }
+        if let known = checked.known {
             let model = InstalledModel(
                 fileName: name, kind: known.kind, name: known.name, style: known.style, isBuiltIn: true, bytes: bytes
             )
-            return Added(model: model, warning: warning)
+            return Added(model: model, warning: checked.warning)
         }
-        let chosenStyle = format.kind == .cleanup ? style ?? Self.suggestedStyle(name) : nil
+        let kind = checked.format.kind
+        let chosenStyle = kind == .cleanup ? style ?? Self.suggestedStyle(name) : nil
         if let chosenStyle {
-            var saved = registry()
             saved.styles[name] = chosenStyle
-            try? save(saved)
+            changed = true
         }
         let model = InstalledModel(
             fileName: name,
-            kind: format.kind,
+            kind: kind,
             name: Self.displayName(name),
             style: chosenStyle,
             isBuiltIn: false,
             bytes: bytes
         )
-        return Added(model: model, warning: warning)
+        return Added(model: model, warning: checked.warning)
     }
 
     /// Sets the prompt format of a cleanup model the user added.
@@ -273,15 +444,81 @@ public struct ModelLibrary: Sendable {
         try save(saved)
     }
 
-    /// Deletes a model the user added. Built-in models are left alone.
-    public func remove(_ fileName: String) throws {
-        if let known = Self.builtIn.first(where: { $0.fileName == fileName }) {
-            throw ModelError.builtIn(known.name)
+    /// The longest name a model can be given.
+    public static let maxNameLength = 60
+
+    /// What a model is called until the user names it: Lucid's name for one of its own models,
+    /// otherwise the file name without the extension.
+    public static func defaultName(for fileName: String) -> String {
+        builtIn.first { $0.fileName == fileName }?.name ?? displayName(fileName)
+    }
+
+    /// Gives a model a name of the user's choosing, shown wherever Lucid lists models. The file
+    /// keeps its name, so nothing that refers to it changes. An empty name, or the model's
+    /// original one, goes back to the original. Returns the name now in use.
+    @discardableResult
+    public func rename(_ fileName: String, to newName: String) throws -> String {
+        let installed = models()
+        guard installed.contains(where: { $0.fileName == fileName }) else { throw ModelError.notFound(fileName) }
+        // One line, with single spaces: a pasted name may carry line breaks and tabs.
+        let name = newName.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).joined(separator: " ")
+        let original = Self.defaultName(for: fileName)
+        var saved = registry()
+        guard !name.isEmpty, name != original else {
+            if saved.names.removeValue(forKey: fileName) != nil { try save(saved) }
+            return original
         }
+        guard name.count <= Self.maxNameLength else { throw ModelError.nameTooLong(Self.maxNameLength) }
+        // Another model's original name counts too, so that resetting it later cannot make two alike.
+        let taken = installed.contains { other in
+            other.fileName != fileName
+                && [other.name, Self.defaultName(for: other.fileName)]
+                    .contains { $0.caseInsensitiveCompare(name) == .orderedSame }
+        }
+        guard !taken else { throw ModelError.nameTaken(name) }
+        saved.names[fileName] = name
+        try save(saved)
+        return name
+    }
+
+    /// Deletes a model from the models folder, Lucid's own included, and returns the bytes freed.
+    /// A built-in model can be downloaded again in Settings or with `scripts/setup.sh`.
+    @discardableResult
+    public func remove(_ fileName: String) throws -> Int64 {
         let url = directory.appendingPathComponent(fileName)
         // A link is removed, never the file it points to. `fileExists` would follow the link,
         // so ask for the link's own attributes.
-        guard Self.mayBeModel(fileName), (try? FileManager.default.attributesOfItem(atPath: url.path)) != nil else {
+        guard Self.mayBeModel(fileName), let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+            throw ModelError.notFound(fileName)
+        }
+        let bytes = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            throw ModelError.removeFailed(error.localizedDescription)
+        }
+        var saved = registry()
+        let hadStyle = saved.styles.removeValue(forKey: fileName) != nil
+        let hadName = saved.names.removeValue(forKey: fileName) != nil
+        if hadStyle || hadName { try? save(saved) }
+        return bytes
+    }
+
+    /// Downloads that stopped part way, with how much of each arrived.
+    public func partialDownloads() -> [PartialDownload] {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory.path) else { return [] }
+        return names
+            .filter { $0.hasSuffix(".part") && !$0.hasSuffix(".copy.part") }
+            .map { String($0.dropLast(".part".count)) }
+            .filter(Self.mayBeModel)
+            .compactMap { name in partialBytes(of: name).map { PartialDownload(fileName: name, bytes: $0) } }
+            .sorted { $0.fileName.localizedStandardCompare($1.fileName) == .orderedAscending }
+    }
+
+    /// Deletes what an unfinished download left behind.
+    public func discardPartial(of fileName: String) throws {
+        let url = partialURL(for: fileName)
+        guard Self.mayBeModel(fileName), FileManager.default.fileExists(atPath: url.path) else {
             throw ModelError.notFound(fileName)
         }
         do {
@@ -289,14 +526,24 @@ public struct ModelLibrary: Sendable {
         } catch {
             throw ModelError.removeFailed(error.localizedDescription)
         }
-        var saved = registry()
-        if saved.styles.removeValue(forKey: fileName) != nil { try? save(saved) }
     }
 
     // MARK: Helpers
 
     private struct Registry: Codable {
+        /// The prompt format of each cleanup model the user added, by file name.
         var styles: [String: PromptStyle] = [:]
+        /// The names the user gave to models, by file name.
+        var names: [String: String] = [:]
+
+        init() {}
+
+        /// Either part may be missing: a file written before models could be renamed has no names.
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            styles = try container.decodeIfPresent([String: PromptStyle].self, forKey: .styles) ?? [:]
+            names = try container.decodeIfPresent([String: String].self, forKey: .names) ?? [:]
+        }
     }
 
     private func registry() -> Registry {

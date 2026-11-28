@@ -1,0 +1,7 @@
+// GTK and the tray icon library, which the Linux half of CLucidDesk is built on. This only
+// tells the build where to find them. Lucid's Swift code does not use them directly.
+module CLucidGtk [system] {
+    header "shim.h"
+    link "ayatana-appindicator3"
+    export *
+}

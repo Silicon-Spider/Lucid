@@ -1,0 +1,232 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The whole of Lucid: the menu-bar app, lucid-cli and the tests.
+  build-and-test:
+    name: Build and test on macOS
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Swift version
+        run: swift --version
+
+      # Builds the app, lucid-cli and the test runner.
+      - name: Build
+        run: swift build
+
+      # The unit tests. scripts/setup.sh and scripts/integration.sh are left out on
+      # purpose: they download about 1 GB of models.
+      - name: Unit tests
+        run: scripts/test.sh
+
+      # Draws the app's windows to PNG files without showing them.
+      - name: Draw the windows
+        timeout-minutes: 5
+        run: .build/debug/Lucid --render-ui "$RUNNER_TEMP/ui"
+
+      - name: Upload the drawings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui
+          path: ${{ runner.temp }}/ui
+          if-no-files-found: ignore
+
+  # The Linux app, lucid-cli and the tests.
+  linux:
+    name: Build and test on Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      # What the app is built on, and what scripts/with-test-desktop.sh needs to make a
+      # desktop that only exists in memory to try it on.
+      - name: Install what the app needs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev libayatana-appindicator3-dev libxi-dev libxtst-dev \
+            xvfb openbox dbus-x11 xcompmgr pulseaudio pulseaudio-utils xterm imagemagick
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Build
+        run: swift build
+
+      - name: Unit tests
+        run: scripts/test.sh
+
+      # The part of the app that talks to the desktop, on its own: the pill, the tray icon
+      # and its menu, the dictation key, the clipboard, the microphone, and typing into
+      # another program's window and into a terminal.
+      - name: Test the Linux layer
+        timeout-minutes: 5
+        run: scripts/test-linux-layer.sh pictures
+
+      # The app itself, started the way a script can start it: it tries each part that needs
+      # a desktop and writes down what it found.
+      - name: Try the app
+        timeout-minutes: 5
+        run: |
+          scripts/with-test-desktop.sh "$(swift build --show-bin-path)/Lucid" --self-test "$PWD/linux-layer-pictures/self-test.txt"
+
+      # Pictures of the pill and the tray icon as they were drawn.
+      - name: Upload the pictures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: linux-layer-pictures
+          if-no-files-found: ignore
+
+  # The real thing on Linux: the engines and models that scripts/setup-linux.sh installs, and
+  # the app itself on a desktop that only exists in memory, typing what a synthesised voice
+  # says into an editor.
+  linux-dictation:
+    name: Dictate on Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install what the app needs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev libayatana-appindicator3-dev libxi-dev libxtst-dev \
+            xvfb openbox dbus-x11 xcompmgr pulseaudio pulseaudio-utils imagemagick \
+            espeak-ng xdotool curl cmake g++
+
+      # The engines, one of them built from its source, and about 600 MB of models. Kept
+      # between runs, so that is done once.
+      - name: Keep the engines and models
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/Lucid
+          key: lucid-linux-${{ hashFiles('scripts/setup-linux.sh') }}
+
+      # A small speech model: the machine has no graphics card to speed up a large one.
+      - name: Set up
+        run: scripts/setup-linux.sh --speech-model ggml-base.en.bin
+
+      - name: Dictate synthesised speech into an editor
+        timeout-minutes: 10
+        run: scripts/integration-linux.sh pictures
+
+      # Pictures of the screen while speaking and after.
+      - name: Upload the pictures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-app
+          path: linux-app-pictures
+          if-no-files-found: ignore
+
+  # The Windows app, lucid-cli and the tests.
+  windows:
+    name: Build and test on Windows
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      # Windows runners do not come with Swift. The action is pinned to the commit of v0.5.1.
+      # Swift 6.0 cannot be used: its headers clash with the current Windows SDK.
+      - name: Install Swift
+        uses: compnerd/gha-setup-swift@9ff1ee4c44888c5817fc14d1b257ac8cabb4935f
+        with:
+          swift-version: swift-6.2.3-release
+          swift-build: 6.2.3-RELEASE
+
+      - name: Swift version
+        run: swift --version
+
+      - name: Build
+        run: swift build
+
+      - name: Unit tests
+        run: swift run LucidCoreTests
+
+      # The part of the app that talks to Windows, on its own: the pill, the tray icon and its
+      # menu, the dictation key, the clipboard, and typing into another program's window.
+      - name: Test the Windows layer
+        timeout-minutes: 5
+        run: |
+          New-Item -ItemType Directory -Force windows-pictures | Out-Null
+          clang -std=c11 -O1 -D_CRT_SECURE_NO_WARNINGS -ISources/CLucidDesk/include (Get-ChildItem Sources/CLucidDesk/windows/*.c) Tests/CLucidDeskTests/windows.c -o harness.exe -luser32 -lgdi32 -lshell32 -lwinmm -lcomdlg32 -ladvapi32 -lversion
+          if ($LASTEXITCODE -ne 0) { throw 'The Windows layer did not build.' }
+          .\harness.exe windows-pictures
+          if ($LASTEXITCODE -ne 0) { throw 'The Windows layer failed its checks.' }
+
+      # The app itself, started the way a script can start it: it tries each part that needs
+      # Windows and writes down what it found.
+      - name: Try the app
+        timeout-minutes: 5
+        run: |
+          $app = Join-Path (swift build --show-bin-path) 'Lucid.exe'
+          $report = Join-Path $PWD 'windows-pictures\self-test.txt'
+          $run = Start-Process $app -ArgumentList '--self-test', "`"$report`"" -Wait -PassThru
+          if (Test-Path $report) { Get-Content $report }
+          if ($run.ExitCode -ne 0) { throw "The app failed its self-test (exit code $($run.ExitCode))." }
+
+      # Pictures of the pill and the tray icon as Windows drew them.
+      - name: Upload the pictures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: windows-pictures
+          if-no-files-found: ignore
+
+  # The real thing on Windows: the engines and models that scripts\setup.ps1 installs, turning
+  # synthesised speech into clean text. The unit tests above use stand-ins for both.
+  windows-dictation:
+    name: Dictate on Windows
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Swift
+        uses: compnerd/gha-setup-swift@9ff1ee4c44888c5817fc14d1b257ac8cabb4935f
+        with:
+          swift-version: swift-6.2.3-release
+          swift-build: 6.2.3-RELEASE
+
+      # About 1 GB of engines and models. Kept between runs, so they are downloaded once.
+      - name: Keep the engines and models
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\Lucid
+          key: lucid-windows-${{ hashFiles('scripts/setup.ps1') }}
+
+      - name: Set up
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts\setup.ps1
+
+      # Windows PowerShell, not PowerShell 7: it is the one that has the speech synthesiser.
+      - name: Dictate synthesised speech
+        shell: powershell
+        run: |
+          scripts\integration.ps1 | Tee-Object -FilePath dictation.txt
+          $said = Get-Content dictation.txt -Raw
+          if ($said -notmatch 'see you') { throw 'The speech engine did not hear "see you then".' }
+          if ($said -notmatch 'cleanup model used') { throw 'The cleanup engine was never used.' }
+          if ($said -match 'Paris') { throw 'Lucid answered a dictated question instead of cleaning it.' }

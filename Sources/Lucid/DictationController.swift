@@ -12,6 +12,8 @@ final class DictationController {
     private let recorder = AudioRecorder()
     private var machine = DictationMachine()
     private var ticker: Timer?
+    /// Asks the speech engine what it has heard so far, while the user is still speaking.
+    private var previews: Task<Void, Never>?
 
     /// Called after a dictation has been added to history.
     var onHistoryChange: (() -> Void)?
@@ -52,6 +54,7 @@ final class DictationController {
         case .stopAndProcess:
             stopAndProcess()
         case .discard:
+            stopPreviews()
             recorder.stop()
             pill.hide()
         case .enterHandsFree:
@@ -84,13 +87,52 @@ final class DictationController {
             try recorder.start()
             pill.setLevel(0)
             pill.show(.recording)
+            startPreviews()
         } catch {
             send(.escape)
             pill.flash("No microphone found")
         }
     }
 
+    /// Shows the last few words heard, about once a second, until the recording ends.
+    ///
+    /// Each preview transcribes the end of the recording so far. It is only shown. The text
+    /// that is inserted comes from the whole recording, once the user stops.
+    private func startPreviews() {
+        stopPreviews()
+        guard settings.livePreview else { return }
+        let dictionary = (try? PersonalDictionary.load(from: AppSettings.dictionaryURL)) ?? .empty
+        let prompt = dictionary.recognitionPrompt()
+        previews = Task { [weak self] in
+            var atLastRequest: Double?
+            var lastTook = 0.0
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard let self, !Task.isCancelled, self.machine.isRecording else { return }
+                let recorded = self.recorder.recordedSeconds
+                guard LivePreview.shouldRequest(recordedSeconds: recorded, atLastRequest: atLastRequest, lastTook: lastTook)
+                else { continue }
+                atLastRequest = recorded
+                let window = self.recorder.latest(seconds: LivePreview.windowSeconds)
+                // The speech engine invents words when given silence.
+                guard AudioGate.hasSpeech(samples: window) else { continue }
+                let began = Date()
+                let heard = await self.engines.preview(wav: WAV.encode(samples: window), prompt: prompt)
+                lastTook = Date().timeIntervalSince(began)
+                guard !Task.isCancelled, self.machine.isRecording, let heard else { continue }
+                let text = LivePreview.text(for: heard)
+                if !text.isEmpty { self.pill.setPreview(text) }
+            }
+        }
+    }
+
+    private func stopPreviews() {
+        previews?.cancel()
+        previews = nil
+    }
+
     private func stopAndProcess() {
+        stopPreviews()
         let samples = recorder.stop()
         // Read the cursor's surroundings now, while the user's app still has focus.
         let target = TextInserter.captureTarget()
