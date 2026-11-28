@@ -6,10 +6,12 @@ import PackageDescription
 var targets: [Target] = [
     .target(name: "LucidCore"),
     .target(name: "LucidEngines", dependencies: ["LucidCore"]),
-    .executableTarget(name: "lucid-cli", dependencies: ["LucidCore", "LucidEngines"]),
+    // The app without a screen: dictation, settings, models, and the local page that is its window.
+    .target(name: "LucidApp", dependencies: ["LucidCore", "LucidEngines"]),
+    .executableTarget(name: "lucid-cli", dependencies: ["LucidCore", "LucidEngines", "LucidApp"]),
     .executableTarget(
         name: "LucidCoreTests",
-        dependencies: ["LucidCore", "LucidEngines"],
+        dependencies: ["LucidCore", "LucidEngines", "LucidApp"],
         path: "Tests/LucidCoreTests"
     ),
 ]

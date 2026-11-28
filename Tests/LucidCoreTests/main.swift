@@ -23,5 +23,7 @@ historyTests()
 dictionaryEditingTests()
 modelLibraryTests()
 await downloadTests()
+await localServerTests()
+await deskTests()
 
 TestRun.shared.finish()

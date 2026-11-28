@@ -1,4 +1,5 @@
 import Foundation
+import LucidApp
 import LucidCore
 import LucidEngines
 
@@ -47,6 +48,8 @@ lucid-cli: command-line access to Lucid's dictation pipeline
 
   lucid-cli doctor                      check that the engines and models are installed
   lucid-cli folder models|engines|logs  print where Lucid keeps its models, engines or logs
+  lucid-cli window                      open Lucid's window in a browser: models, dictionary,
+                                        history and settings. It stays open until you press Ctrl+C.
   lucid-cli models                      list the models in Lucid's models folder
   lucid-cli add-model [--style s1|general] <file>
                                         copy a speech (.bin) or cleanup (.gguf) model into it
@@ -182,6 +185,34 @@ func runFolder(_ arguments: Arguments) throws -> Int32 {
     default: throw CLIError("folder needs one of: models, engines, logs")
     }
     return 0
+}
+
+/// Serves Lucid's window without the dictation key, the microphone or the pill, for systems
+/// where the app itself does not run. The address it prints works only on this computer.
+func runWindow() async throws -> Int32 {
+    let desk = try Desk(shell: HeadlessShell(), tracksProcesses: false)
+    desk.start()
+    print("Lucid's window is open at:\n\n  \(desk.windowAddress())\n")
+    print("Open that address in a browser on this computer. Press Ctrl+C to close it.")
+    // When the output is not a terminal it is held back until there is more of it. Send it now.
+    fflush(stdout)
+
+    #if !os(Windows)
+    // Ctrl+C must stop the engines too, or they would be left running.
+    signal(SIGINT, SIG_IGN)
+    signal(SIGTERM, SIG_IGN)
+    let sources = [SIGINT, SIGTERM].map { number -> DispatchSourceSignal in
+        let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
+        source.setEventHandler {
+            desk.stop()
+            exit(0)
+        }
+        source.resume()
+        return source
+    }
+    defer { sources.forEach { $0.cancel() } }
+    #endif
+    while true { try await Task.sleep(nanoseconds: 3_600_000_000_000) }
 }
 
 func runModels() -> Int32 {
@@ -474,6 +505,7 @@ func run() async throws -> Int32 {
     switch command {
     case "doctor": return try runDoctor(arguments)
     case "folder": return try runFolder(arguments)
+    case "window": return try await runWindow()
     case "models": return runModels()
     case "add-model": return try runAddModel(arguments)
     case "download": return try await runDownload(arguments)

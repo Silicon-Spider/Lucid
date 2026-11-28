@@ -42,6 +42,42 @@ extension AppCategory {
 
     private static let codePrefixes = ["com.jetbrains."]
 
+    // Windows program names, lower-cased, without ".exe".
+    private static let emailPrograms: Set<String> = [
+        "outlook", "olk", "hxoutlook", "thunderbird", "mailspring", "mailclient",
+    ]
+
+    private static let chatPrograms: Set<String> = [
+        "slack", "teams", "ms-teams", "discord", "telegram", "whatsapp", "signal", "element",
+    ]
+
+    /// Terminals, editors and AI chat apps, as on the Mac.
+    private static let codePrograms: Set<String> = [
+        "windowsterminal", "cmd", "powershell", "pwsh", "conhost", "wezterm-gui", "alacritty",
+        "code", "cursor", "windsurf", "zed", "devenv", "sublime_text", "notepad++",
+        "idea64", "pycharm64", "webstorm64", "clion64", "rider64", "goland64", "rustrover64",
+        "phpstorm64", "datagrip64", "studio64",
+        "claude", "chatgpt",
+    ]
+
+    /// The category for a Windows program, given its file name with or without ".exe".
+    /// Unknown programs are `.other`.
+    public static func forProgram(_ name: String?) -> AppCategory {
+        guard var program = name?.lowercased(), !program.isEmpty else { return .other }
+        if program.hasSuffix(".exe") { program.removeLast(4) }
+        if emailPrograms.contains(program) { return .email }
+        if chatPrograms.contains(program) { return .chat }
+        if codePrograms.contains(program) { return .code }
+        return .other
+    }
+
+    /// The category for an app, whichever way its system names it: a bundle identifier on a
+    /// Mac, a program's file name on Windows.
+    public static func forApp(_ id: String?) -> AppCategory {
+        let category = forBundleID(id)
+        return category == .other ? forProgram(id) : category
+    }
+
     /// The category for a macOS bundle identifier. Unknown apps are `.other`.
     public static func forBundleID(_ bundleID: String?) -> AppCategory {
         guard let id = bundleID?.lowercased(), !id.isEmpty else { return .other }
