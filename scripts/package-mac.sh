@@ -70,7 +70,7 @@ for TAG in $(newest_tags ggml-org/llama.cpp '^b[0-9]+$' 4); do
   fi
   FILE="llama-$TAG-bin-macos-arm64.tar.gz"
   # The newest release may still be on its way up, so the few before it are tried too.
-  if curl -fsSL -o "$WORK/$FILE" "https://github.com/ggml-org/llama.cpp/releases/download/$TAG/$FILE"; then
+  if curl -fsSL -o "$WORK/$FILE" "https://github.com/ggml-org/llama.cpp/releases/download/$TAG/$FILE" 2>/dev/null; then
     echo "download $FILE"
     mkdir -p "$WORK/llama"
     tar -xzf "$WORK/$FILE" -C "$WORK/llama"

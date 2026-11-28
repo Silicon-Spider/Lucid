@@ -80,7 +80,7 @@ for TAG in $(newest_tags ggml-org/llama.cpp '^b[0-9]+$' 4); do
   fi
   FILE="llama-$TAG-bin-ubuntu-$ARCH.tar.gz"
   # The newest release may still be on its way up, so the few before it are tried too.
-  if curl -fsSL -o "$WORK/$FILE" "https://github.com/ggml-org/llama.cpp/releases/download/$TAG/$FILE"; then
+  if curl -fsSL -o "$WORK/$FILE" "https://github.com/ggml-org/llama.cpp/releases/download/$TAG/$FILE" 2>/dev/null; then
     echo "download $FILE ($(( $(stat -c %s "$WORK/$FILE") / 1048576 )) MB)"
     mkdir -p "$WORK/llama"
     tar -xzf "$WORK/$FILE" -C "$WORK/llama"

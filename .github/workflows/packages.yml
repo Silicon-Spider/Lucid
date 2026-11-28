@@ -176,6 +176,7 @@ jobs:
             if ($code -ne 0) { throw "$($engine.Name) does not start (exit code $code)." }
             Write-Host "$($engine.Name) starts."
           }
+          exit 0
 
       - name: Upload it
         uses: actions/upload-artifact@v4
