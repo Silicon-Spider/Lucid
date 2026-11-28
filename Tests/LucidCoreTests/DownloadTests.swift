@@ -135,7 +135,9 @@ private final class FakeHub {
     /// The Range headers the server received for a file, oldest first.
     func ranges(_ path: String) -> [String] {
         let text = (try? String(contentsOf: url(path + ".ranges"), encoding: .utf8)) ?? ""
-        return text.split(separator: "\n").map(String.init)
+        // On Windows the server ends each line with a carriage return and a line feed, which
+        // Swift reads as one character. Any kind of line break separates the entries.
+        return text.split(whereSeparator: { $0.isNewline }).map(String.init)
     }
 
     /// The answer Hugging Face gives for a repository's files.

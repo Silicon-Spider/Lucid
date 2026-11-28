@@ -34,25 +34,32 @@ $engines = & $cli folder engines
 $models = & $cli folder models
 if (-not $engines -or -not $models) { throw 'lucid-cli did not say where its folders are.' }
 
-# Finds the newest release of an engine on GitHub, and in it the download that suits this PC:
-# the zip whose name has every word in $Wanted and none in $Unwanted.
+# Finds the download of an engine on GitHub that suits this PC: the zip whose name has every
+# word in $Wanted and none in $Unwanted. Not every release comes with programs for Windows, so
+# this looks back from the newest release until it finds one that does.
 function Find-Download([string]$Repository, [string[]]$Wanted, [string[]]$Unwanted) {
     $headers = @{ 'User-Agent' = 'lucid-setup' }
     if ($env:GITHUB_TOKEN) { $headers['Authorization'] = "Bearer $env:GITHUB_TOKEN" }
-    $release = Invoke-RestMethod "https://api.github.com/repos/$Repository/releases/latest" -Headers $headers
-    $zips = @($release.assets | Where-Object { $_.name -like '*.zip' })
-    $fits = @($zips | Where-Object {
-        $name = $_.name.ToLower()
-        $missing = @($Wanted | Where-Object { $name -notlike "*$_*" })
-        $present = @($Unwanted | Where-Object { $name -like "*$_*" })
-        ($missing.Count -eq 0) -and ($present.Count -eq 0)
-    } | Sort-Object { $_.name.Length })
-    if ($fits.Count -eq 0) {
-        Write-Host "No download of $Repository $($release.tag_name) suits this PC. It offers:"
-        $zips | ForEach-Object { Write-Host "  $($_.name)" }
-        throw "Could not choose a download of $Repository."
+    $releases = @(Invoke-RestMethod "https://api.github.com/repos/$Repository/releases?per_page=30" -Headers $headers)
+    foreach ($release in $releases) {
+        if ($release.draft -or $release.prerelease) { continue }
+        $fits = @($release.assets | Where-Object { $_.name -like '*.zip' } | Where-Object {
+            $name = $_.name.ToLower()
+            $missing = @($Wanted | Where-Object { $name -notlike "*$_*" })
+            $present = @($Unwanted | Where-Object { $name -like "*$_*" })
+            ($missing.Count -eq 0) -and ($present.Count -eq 0)
+        } | Sort-Object { $_.name.Length })
+        if ($fits.Count -gt 0) {
+            Write-Host "found    $($fits[0].name) in $Repository $($release.tag_name)"
+            return $fits[0]
+        }
     }
-    return $fits[0]
+    Write-Host "None of the last $($releases.Count) releases of $Repository has a download that suits this PC. They offer:"
+    foreach ($release in ($releases | Select-Object -First 8)) {
+        $names = @($release.assets | ForEach-Object { $_.name }) -join ', '
+        Write-Host "  $($release.tag_name): $names"
+    }
+    throw "Could not choose a download of $Repository."
 }
 
 # Each engine gets a folder of its own. They cannot share one: both come with files of the same names.
