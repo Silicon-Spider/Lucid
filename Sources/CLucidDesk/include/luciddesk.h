@@ -1,10 +1,13 @@
-/* Everything Lucid asks of Windows, in plain C: the tray icon and its menu, the dictation
-   key, the microphone, the pill, and typing into the app in front.
+/* Everything Lucid asks of the desktop it runs on, in plain C: the tray icon and its menu,
+   the dictation key, the microphone, the pill, and typing into the app in front.
+
+   There are two of these: one for Windows, in windows/, and one for Linux, in linux/. The
+   app on top of them is the same.
 
    All text is UTF-8. Unless a function says "any thread", call it on the thread that
    called lucid_start, which is also the thread every callback arrives on. */
-#ifndef LUCIDWIN_H
-#define LUCIDWIN_H
+#ifndef LUCIDDESK_H
+#define LUCIDDESK_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -19,7 +22,8 @@ enum {
     LUCID_KEY_DOWN = 0,   /* the dictation key went down */
     LUCID_KEY_UP = 1,     /* the dictation key came up */
     LUCID_KEY_OTHER = 2,  /* any other key went down */
-    LUCID_KEY_ESCAPE = 3  /* Escape went down, and Lucid kept it from the app in front */
+    LUCID_KEY_ESCAPE = 3  /* Escape went down while Lucid wanted it. On Windows it is also
+                             kept from the app in front. Linux has no way to do that. */
 };
 
 /* What the pill shows. */
@@ -68,8 +72,12 @@ typedef struct {
 bool lucid_claim_single_instance(void);
 /* Lucid's engines are console programs, and Windows opens a console window for each one
    that an app starts. This gives Lucid a console with no window, which they then share.
-   Call it before starting them. False if Windows would not, and the windows will show. */
+   Call it before starting them. False if Windows would not, and the windows will show.
+   On Linux there is nothing to hide, and it is always true. */
 bool lucid_hide_consoles(void);
+/* True in a Wayland session on Linux, where an app is not shown other apps' keys and may
+   not press keys in them, unless the user has allowed it. Any thread. */
+bool lucid_is_wayland(void);
 /* Creates the tray icon and the pill, and starts watching the keyboard. False when
    Windows would not even give Lucid a window. */
 bool lucid_start(const LucidCallbacks *callbacks);
@@ -86,8 +94,10 @@ void lucid_wake(void);
 
 /* ---- The keyboard ---- */
 
-/* Which key starts a dictation, as a Windows virtual-key code. Any thread. */
+/* Which key starts a dictation: a virtual-key code on Windows, and on Linux a key code as
+   in <linux/input-event-codes.h>, which is the same for every keyboard layout. Any thread. */
 void lucid_set_hotkey(int virtual_key);
+/* False when the system does not let Lucid see key presses. Any thread. */
 bool lucid_keyboard_watched(void);
 /* For tests: also act on key presses made by programs, and make one. */
 void lucid_test_accept_made_up_keys(bool accept);
@@ -95,9 +105,13 @@ bool lucid_test_press(int virtual_key, bool down);
 
 /* ---- The microphone: 16 kHz, one channel, 16 bits ---- */
 
+/* How many microphones there are. Any thread. */
 int lucid_mic_devices(void);
 /* False when Windows' privacy settings keep apps from the microphone. Any thread. */
 bool lucid_mic_allowed(void);
+/* What Lucid records with: on Linux the program, such as "parec", and nothing when none of
+   those it knows is installed. Returns the name's length. Any thread. */
+size_t lucid_mic_recorder(char *out, size_t capacity);
 bool lucid_mic_start(void);
 /* How many samples have been recorded so far. Any thread. */
 size_t lucid_mic_count(void);
@@ -122,7 +136,8 @@ void lucid_pill_pulse(void);
 /* The last few words heard, beside the level bars. */
 void lucid_pill_preview(const char *text);
 bool lucid_pill_visible(void);
-/* For tests: saves the pill as it was last drawn, over a plain colour (0xRRGGBB), as a .bmp file. */
+/* For tests: saves the pill as it was last drawn, over a plain colour (0xRRGGBB). The
+   picture is a .bmp file on Windows and a .png file on Linux. */
 bool lucid_test_pill_picture(const char *path, uint32_t background);
 
 /* ---- The tray icon and its menu ---- */
@@ -133,7 +148,8 @@ void lucid_tray_update(int state, const char *tooltip);
 void lucid_tray_notify(const char *title, const char *text);
 void lucid_menu_clear(void);
 void lucid_menu_add(int command, const char *title, int flags);
-/* For tests: saves the tray icon as Windows draws it, over a plain colour, as a .bmp file. */
+/* For tests: saves the tray icon over a plain colour, as a .bmp file on Windows and a .png
+   file on Linux. */
 bool lucid_test_tray_picture(const char *path, uint32_t background);
 /* For tests: the menu as lines of text, as lucid_menu_add built it. Returns its length. */
 size_t lucid_test_menu(char *out, size_t capacity);
@@ -150,14 +166,17 @@ uintptr_t lucid_front_window(
 bool lucid_copy(const char *text);
 /* The text on the clipboard. Returns its length in bytes. */
 size_t lucid_clipboard_text(char *out, size_t capacity);
-/* Types text into the app in front: puts it on the clipboard, presses Ctrl+V, and a moment
-   later puts back what was on the clipboard. False when there was nowhere to type, and the
-   text was left on the clipboard instead. */
+/* Types text into the app in front: puts it on the clipboard, presses the keys that paste,
+   and a moment later puts back what was on the clipboard. False when there was nowhere to
+   type, or Lucid may not press keys, and the text was left on the clipboard instead. */
 bool lucid_paste(const char *text);
+/* False when the system does not let Lucid press keys in other apps, so lucid_paste can
+   only leave the text on the clipboard. Any thread. */
+bool lucid_can_type(void);
 
 /* ---- Windows itself ---- */
 
-/* Opens a folder, a link, or a page of Windows' settings such as "ms-settings:sound". */
+/* Opens a folder or a link. On Windows also a page of its settings, such as "ms-settings:sound". */
 bool lucid_open(const char *target);
 /* Opens a page in a window of its own, without a browser's toolbar. `profile` is a folder
    the browser may keep that window's settings in. */
@@ -168,6 +187,10 @@ void lucid_close_window(const char *title);
 /* Shows the file chooser. `patterns` is like "*.bin;*.gguf". Returns the path's length, or
    0 if the user chose nothing. */
 size_t lucid_choose_file(const char *title, const char *kinds, const char *patterns, char *out, size_t capacity);
+/* Adds Lucid to the desktop's menu of applications, with its icon, so that it can be opened
+   like any other app. On Linux this writes the entry for whoever is signed in, and needs
+   no display. On Windows scripts\setup.ps1 adds the Start menu entry, and this does nothing. */
+bool lucid_install_launcher(void);
 bool lucid_opens_at_login(void);
 bool lucid_set_opens_at_login(bool on);
 void lucid_alert(const char *title, const char *text);

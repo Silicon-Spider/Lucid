@@ -1,4 +1,5 @@
 // swift-tools-version: 5.9
+import Foundation
 import PackageDescription
 
 // The dictation pipeline, the engines, the command-line tool and the tests build on macOS,
@@ -21,36 +22,57 @@ var targets: [Target] = [
 targets.append(.executableTarget(name: "Lucid", dependencies: ["LucidCore", "LucidEngines"]))
 #else
 
-// The Windows app: the tray icon, the dictation key, the microphone, the pill and typing are
-// a layer of C over Windows itself, and the app on top of it is Swift.
-//
-// Setting LUCID_WINDOWS_SHELL lets another system check that Swift:
-//     LUCID_WINDOWS_SHELL=1 swift build --target Lucid
-// The C compiles to nothing there, so it cannot be linked or run.
+// The app for Windows and for Linux. What each desktop provides (the tray icon, the dictation
+// key, the microphone, the pill and typing) is a layer of C, CLucidDesk, with a half for
+// each system. The app on top of it, in Sources/LucidDesktop, is the same Swift for both.
+var desktopLayer: Target?
+
 #if os(Windows)
-let buildsWindowsApp = true
-#else
-let buildsWindowsApp = Context.environment["LUCID_WINDOWS_SHELL"] != nil
-#endif
-if buildsWindowsApp {
-    targets.append(.target(
-        name: "CLucidWin",
-        linkerSettings: ["user32", "gdi32", "shell32", "winmm", "comdlg32", "advapi32", "version"].map {
-            .linkedLibrary($0, .when(platforms: [.windows]))
-        }
+desktopLayer = .target(
+    name: "CLucidDesk",
+    linkerSettings: ["user32", "gdi32", "shell32", "winmm", "comdlg32", "advapi32", "version"].map { .linkedLibrary($0) }
+)
+#elseif os(Linux)
+// The Linux half is built on GTK, which a computer without a desktop does not have. There,
+// only lucid-cli and the tests are built. scripts/setup-linux.sh installs what is needed.
+// LUCID_LINUX_APP=0 leaves the app out, and LUCID_LINUX_APP=1 insists on it.
+let gtkHeaders = [
+    "/usr/include/gtk-3.0/gtk/gtk.h",
+    "/usr/include/libayatana-appindicator3-0.1/libayatana-appindicator/app-indicator.h",
+    "/usr/include/X11/extensions/XInput2.h",
+    "/usr/include/X11/extensions/XTest.h",
+]
+let wanted = Context.environment["LUCID_LINUX_APP"]
+if wanted == "1" || (wanted != "0" && gtkHeaders.allSatisfy { FileManager.default.fileExists(atPath: $0) }) {
+    targets.append(.systemLibrary(
+        name: "CLucidGtk",
+        pkgConfig: "ayatana-appindicator3-0.1",
+        providers: [
+            .apt(["libgtk-3-dev", "libayatana-appindicator3-dev", "libxi-dev", "libxtst-dev"]),
+            .yum(["gtk3-devel", "libayatana-appindicator-gtk3-devel", "libXi-devel", "libXtst-devel"]),
+        ]
     ))
+    desktopLayer = .target(
+        name: "CLucidDesk",
+        dependencies: ["CLucidGtk"],
+        linkerSettings: ["X11", "Xi", "Xtst", "m"].map { .linkedLibrary($0) }
+    )
+}
+#endif
+
+if let desktopLayer {
+    targets.append(desktopLayer)
+    var linking: [LinkerSetting] = []
+    #if os(Windows)
+    // An app, not a console program: without this, Windows opens a black console window
+    // beside it.
+    linking.append(.unsafeFlags(["-Xlinker", "/SUBSYSTEM:WINDOWS", "-Xlinker", "/ENTRY:mainCRTStartup"]))
+    #endif
     targets.append(.executableTarget(
         name: "Lucid",
-        dependencies: ["LucidCore", "LucidEngines", "LucidApp", "CLucidWin"],
-        path: "Sources/LucidWindows",
-        linkerSettings: [
-            // An app, not a console program: without this, Windows opens a black console
-            // window beside it.
-            .unsafeFlags(
-                ["-Xlinker", "/SUBSYSTEM:WINDOWS", "-Xlinker", "/ENTRY:mainCRTStartup"],
-                .when(platforms: [.windows])
-            ),
-        ]
+        dependencies: ["LucidCore", "LucidEngines", "LucidApp", "CLucidDesk"],
+        path: "Sources/LucidDesktop",
+        linkerSettings: linking
     ))
 }
 #endif

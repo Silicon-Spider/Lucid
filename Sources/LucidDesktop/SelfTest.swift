@@ -1,4 +1,4 @@
-import CLucidWin
+import CLucidDesk
 import Foundation
 import LucidApp
 import LucidCore
@@ -7,8 +7,8 @@ import LucidEngines
 import FoundationNetworking
 #endif
 
-/// Starts the app in a folder of its own, tries the parts that need Windows, and writes down
-/// what it found. `Lucid.exe --self-test report.txt` is how automated builds check the app,
+/// Starts the app in a folder of its own, tries the parts that need the desktop, and writes
+/// down what it found. `Lucid --self-test report.txt` is how automated builds check the app,
 /// since nobody is there to hold a key.
 enum SelfTest {
     private final class Report {
@@ -36,8 +36,8 @@ enum SelfTest {
 
         do {
             let library = ModelLibrary(directory: folder.appendingPathComponent("models"))
-            let app = try WindowsApp(folder: folder, library: library, tracksProcesses: false)
-            report.must(app.start(), "Windows gives Lucid its window, tray icon and pill")
+            let app = try DesktopApp(folder: folder, library: library, tracksProcesses: false)
+            report.must(app.start(), "the desktop gives Lucid its window, tray icon and pill")
             check(app, report, pictures: pictures)
             lucid_quit()
             _ = lucid_run()
@@ -53,11 +53,21 @@ enum SelfTest {
         return report.failed ? 1 : 0
     }
 
-    private static func check(_ app: WindowsApp, _ report: Report, pictures: URL) {
+    /// The kind of picture the C layer saves on this system.
+    private static var picture: String {
+        #if os(Windows)
+        return "bmp"
+        #else
+        return "png"
+        #endif
+    }
+
+    private static func check(_ app: DesktopApp, _ report: Report, pictures: URL) {
         let shell = app.shell
         report.note("tray icon shown: \(lucid_tray_shown())")
         report.note("listening for the dictation key: \(lucid_keyboard_watched())")
-        report.note("microphones: \(lucid_mic_devices()), allowed by Windows: \(lucid_mic_allowed())")
+        report.note("microphones: \(lucid_mic_devices()), allowed by the system: \(lucid_mic_allowed()), recorded with: \(shell.recorder)")
+        report.note("a Wayland session: \(lucid_is_wayland()), may press keys in other apps: \(lucid_can_type())")
         report.note("opens at sign-in: \(lucid_opens_at_login())")
         report.note("a console without a window for the engines: \(lucid_hide_consoles())")
         let front = shell.captureTarget()
@@ -84,42 +94,42 @@ enum SelfTest {
         let copied = text { lucid_clipboard_text($0, $1) }
         report.note("clipboard round trip: \(copied == words ? "ok" : "got \"\(copied)\"")")
 
-        // The pill, drawn by Windows with its own font.
+        // The pill, drawn by the desktop with its own font.
         lucid_test_level(0.08)
         shell.showPill(.recording)
         shell.setPreview("so let's meet at three")
         lucid_pump(200)
         report.note("pill visible while recording: \(lucid_pill_visible())")
         report.must(
-            lucid_test_pill_picture(pictures.appendingPathComponent("app-pill-recording.bmp").path, 0x7a8aa0),
+            lucid_test_pill_picture(pictures.appendingPathComponent("app-pill-recording." + picture).path, 0x7a8aa0),
             "draws the pill"
         )
         shell.showPill(.processing)
         lucid_pump(300)
-        _ = lucid_test_pill_picture(pictures.appendingPathComponent("app-pill-processing.bmp").path, 0x7a8aa0)
+        _ = lucid_test_pill_picture(pictures.appendingPathComponent("app-pill-processing." + picture).path, 0x7a8aa0)
         shell.flashPill("Copied. Press Ctrl+V", seconds: 0.2)
         lucid_pump(100)
-        _ = lucid_test_pill_picture(pictures.appendingPathComponent("app-pill-message.bmp").path, 0x7a8aa0)
+        _ = lucid_test_pill_picture(pictures.appendingPathComponent("app-pill-message." + picture).path, 0x7a8aa0)
         lucid_pump(400)
         lucid_test_level(-1)
         report.note("pill hidden again: \(!lucid_pill_visible())")
         report.must(
-            lucid_test_tray_picture(pictures.appendingPathComponent("app-tray.bmp").path, 0x7a8aa0),
+            lucid_test_tray_picture(pictures.appendingPathComponent("app-tray." + picture).path, 0x7a8aa0),
             "draws the tray icon"
         )
 
         // The dictation key, pressed the way a program can. With no microphone the pill says
         // so, and with one, recording starts. Either way the key reached the app.
         lucid_test_accept_made_up_keys(true)
-        let pressed = lucid_test_press(WindowsHotkey.rightControl.virtualKey, true)
+        let pressed = lucid_test_press(DesktopHotkey.rightControl.virtualKey, true)
         lucid_pump(400)
         let answered = lucid_pill_visible()
-        _ = lucid_test_press(WindowsHotkey.rightControl.virtualKey, false)
+        _ = lucid_test_press(DesktopHotkey.rightControl.virtualKey, false)
         lucid_pump(200)
         // Escape cancels a recording that the press may have started.
         if app.desk.driver.isRecording {
-            _ = lucid_test_press(0x1B, true)
-            _ = lucid_test_press(0x1B, false)
+            _ = lucid_test_press(DesktopHotkey.escapeKey, true)
+            _ = lucid_test_press(DesktopHotkey.escapeKey, false)
             lucid_pump(300)
         }
         lucid_test_accept_made_up_keys(false)

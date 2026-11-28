@@ -106,6 +106,13 @@ bool lucid_mic_allowed(void) {
     return true;
 }
 
+size_t lucid_mic_recorder(char *out, size_t room) {
+    static const char name[] = "Windows";
+    if (!out || room < sizeof name) return 0;
+    memcpy(out, name, sizeof name);
+    return sizeof name - 1;
+}
+
 bool lucid_mic_start(void) {
     close_device();
     enter();

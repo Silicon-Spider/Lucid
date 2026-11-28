@@ -42,13 +42,15 @@ extension AppCategory {
 
     private static let codePrefixes = ["com.jetbrains."]
 
-    // Windows program names, lower-cased, without ".exe".
+    // Program names on Windows and Linux, lower-cased, without ".exe".
     private static let emailPrograms: Set<String> = [
         "outlook", "olk", "hxoutlook", "thunderbird", "mailspring", "mailclient",
+        "betterbird", "evolution", "geary", "kmail", "claws-mail",
     ]
 
     private static let chatPrograms: Set<String> = [
         "slack", "teams", "ms-teams", "discord", "telegram", "whatsapp", "signal", "element",
+        "telegram-desktop", "signal-desktop", "element-desktop", "teams-for-linux", "fractal", "nheko", "zulip",
     ]
 
     /// Terminals, editors and AI chat apps, as on the Mac.
@@ -58,9 +60,11 @@ extension AppCategory {
         "idea64", "pycharm64", "webstorm64", "clion64", "rider64", "goland64", "rustrover64",
         "phpstorm64", "datagrip64", "studio64",
         "claude", "chatgpt",
+        "gnome-terminal-server", "gnome-terminal", "konsole", "kitty", "xterm", "foot", "tilix", "ptyxis", "kgx",
+        "xfce4-terminal", "terminator", "wezterm", "ghostty", "codium", "code-oss", "zed-editor", "emacs", "gvim",
     ]
 
-    /// The category for a Windows program, given its file name with or without ".exe".
+    /// The category for a program on Windows or Linux, given its file name with or without ".exe".
     /// Unknown programs are `.other`.
     public static func forProgram(_ name: String?) -> AppCategory {
         guard var program = name?.lowercased(), !program.isEmpty else { return .other }
@@ -72,7 +76,7 @@ extension AppCategory {
     }
 
     /// The category for an app, whichever way its system names it: a bundle identifier on a
-    /// Mac, a program's file name on Windows.
+    /// Mac, a program's file name on Windows and Linux.
     public static func forApp(_ id: String?) -> AppCategory {
         let category = forBundleID(id)
         return category == .other ? forProgram(id) : category

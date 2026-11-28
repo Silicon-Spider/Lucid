@@ -1,4 +1,4 @@
-/* Shared by the files of this library. Not for Lucid's Swift code. */
+/* Shared by the files of the Windows half of this library. Not for Lucid's Swift code. */
 #ifndef LUCIDWIN_INTERNAL_H
 #define LUCIDWIN_INTERNAL_H
 
@@ -29,7 +29,7 @@
 #include <string.h>
 #include <wchar.h>
 
-#include "include/lucidwin.h"
+#include "../include/luciddesk.h"
 
 #define LUCID_COUNT(array) (sizeof(array) / sizeof((array)[0]))
 

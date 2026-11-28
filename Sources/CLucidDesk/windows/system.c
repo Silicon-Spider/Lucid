@@ -235,6 +235,10 @@ bool lucid_set_opens_at_login(bool on) {
     return RegSetKeyValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_NAME, REG_SZ, mine, bytes) == ERROR_SUCCESS;
 }
 
+bool lucid_install_launcher(void) {
+    return false;
+}
+
 void lucid_alert(const char *title, const char *text) {
     wchar_t *wide_title = lucid_wide(title), *wide_text = lucid_wide(text);
     MessageBoxW(NULL, wide_text, wide_title, MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND);

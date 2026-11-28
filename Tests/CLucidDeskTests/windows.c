@@ -16,7 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "lucidwin.h"
+#include "luciddesk.h"
 
 static int failures;
 static int checks;

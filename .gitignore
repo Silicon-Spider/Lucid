@@ -4,3 +4,5 @@
 *.app
 dist/
 windows-layer-pictures/
+linux-layer-pictures/
+linux-app-pictures/

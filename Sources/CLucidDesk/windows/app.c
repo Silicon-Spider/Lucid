@@ -57,6 +57,10 @@ bool lucid_hide_consoles(void) {
     return joined;
 }
 
+bool lucid_is_wayland(void) {
+    return false;
+}
+
 static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
     case LUCID_WM_KEY:

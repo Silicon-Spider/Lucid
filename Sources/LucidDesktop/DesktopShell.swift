@@ -1,10 +1,10 @@
-import CLucidWin
+import CLucidDesk
 import Foundation
 import LucidApp
 import LucidCore
 import LucidEngines
 
-/// Work for the main thread, from any thread. Windows wakes the main thread to do it.
+/// Work for the main thread, from any thread. The desktop wakes the main thread to do it.
 final class Mailbox: @unchecked Sendable {
     private let lock = NSLock()
     private var waiting: [() -> Void] = []
@@ -38,8 +38,8 @@ func text(capacity: Int = 1024, _ fill: (UnsafeMutablePointer<CChar>, Int) -> In
     return text(in: buffer)
 }
 
-/// The keys that can start a dictation, with Windows' own numbers for them.
-enum WindowsHotkey: String, CaseIterable {
+/// The keys that can start a dictation, with each system's own numbers for them.
+enum DesktopHotkey: String, CaseIterable {
     case rightControl
     case rightAlt
     case rightShift
@@ -52,18 +52,37 @@ enum WindowsHotkey: String, CaseIterable {
         }
     }
 
+    /// A virtual-key code on Windows. On Linux, a key code as in <linux/input-event-codes.h>.
     var virtualKey: Int32 {
+        #if os(Windows)
         switch self {
         case .rightControl: return 0xA3
         case .rightAlt: return 0xA5
         case .rightShift: return 0xA1
         }
+        #else
+        switch self {
+        case .rightControl: return 97
+        case .rightAlt: return 100
+        case .rightShift: return 54
+        }
+        #endif
+    }
+
+    /// Escape, in the same numbering.
+    static var escapeKey: Int32 {
+        #if os(Windows)
+        return 0x1B
+        #else
+        return 1
+        #endif
     }
 }
 
-/// Lucid on Windows: the microphone, the pill, the dictation key and typing, by way of the
-/// C layer. The app's logic is in `Desk`, which is the same on every system.
-final class WindowsShell: DeskShell {
+/// Lucid on Windows and on Linux: the microphone, the pill, the dictation key and typing, by
+/// way of the C layer, which has a half for each. The app's logic is in `Desk`, which is the
+/// same on every system.
+final class DesktopShell: DeskShell {
     let mailbox = Mailbox()
     /// Called on the main thread when the pill changes, so the tray icon can follow.
     var onPill: ((PillStatus) -> Void)?
@@ -98,10 +117,16 @@ final class WindowsShell: DeskShell {
     }
 
     var microphoneProblem: String? {
+        #if os(Linux)
+        if recorder.isEmpty { return "Nothing to record with is installed" }
+        #endif
         if lucid_mic_devices() == 0 { return "No microphone found" }
         if !lucid_mic_allowed() { return "Windows is keeping apps from the microphone" }
         return nil
     }
+
+    /// The program Lucid records with on Linux, or nothing when none is installed.
+    var recorder: String { text(capacity: 64) { lucid_mic_recorder($0, $1) } }
 
     // MARK: The pill
 
@@ -146,7 +171,7 @@ final class WindowsShell: DeskShell {
         return DeskTarget(
             appName: appName.isEmpty ? "Unknown app" : appName,
             appID: programName.isEmpty ? nil : programName,
-            // Windows does not say what is before the cursor, so the text goes in as it is.
+            // Neither system says what is before the cursor, so the text goes in as it is.
             before: nil,
             isSecure: secure,
             isClearlyNotText: notText || window == 0,
@@ -174,20 +199,36 @@ final class WindowsShell: DeskShell {
 
     // MARK: What the window shows and asks
 
-    var systemName: String { "Windows" }
+    var systemName: String {
+        #if os(Windows)
+        return "Windows"
+        #else
+        return "Linux"
+        #endif
+    }
+
     var canDictate: Bool { true }
 
     var hotkeys: [HotkeyOption] {
-        WindowsHotkey.allCases.map { HotkeyOption(id: $0.rawValue, title: $0.title) }
+        DesktopHotkey.allCases.map { HotkeyOption(id: $0.rawValue, title: $0.title) }
     }
 
-    var defaultHotkey: String { WindowsHotkey.rightControl.rawValue }
+    var defaultHotkey: String { DesktopHotkey.rightControl.rawValue }
 
     func useHotkey(_ id: String) {
-        lucid_set_hotkey((WindowsHotkey(rawValue: id) ?? .rightControl).virtualKey)
+        lucid_set_hotkey((DesktopHotkey(rawValue: id) ?? .rightControl).virtualKey)
     }
 
     func setupChecks() -> [SetupCheck] {
+        #if os(Windows)
+        return windowsChecks()
+        #else
+        return linuxChecks()
+        #endif
+    }
+
+    #if os(Windows)
+    private func windowsChecks() -> [SetupCheck] {
         let watched = lucid_keyboard_watched()
         let key = SetupCheck(
             id: "keyboard",
@@ -215,19 +256,69 @@ final class WindowsShell: DeskShell {
         }
         return [key, microphone]
     }
+    #else
+    /// How to let Lucid work in a Wayland session, which keeps apps from the keyboard.
+    static let waylandAdvice = "Run scripts/setup-linux.sh --allow-keys, then sign out and in again. Or sign in with an X11 (“Xorg”) session, where none of this is needed."
+
+    private func linuxChecks() -> [SetupCheck] {
+        let wayland = lucid_is_wayland()
+        let watched = lucid_keyboard_watched()
+        let key = SetupCheck(
+            id: "keyboard",
+            title: "Dictation key",
+            detail: watched
+                ? "Lucid is listening for the key."
+                : wayland
+                    ? "This is a Wayland session, which does not show apps the keys you press elsewhere. Lucid can read the keyboard itself if you allow it. " + Self.waylandAdvice
+                    : "The display did not let Lucid listen for the key. Quit Lucid from its icon in the panel, then open it again.",
+            done: watched
+        )
+
+        let microphone: SetupCheck
+        if recorder.isEmpty {
+            microphone = SetupCheck(
+                id: "microphone", title: "Microphone",
+                detail: "Lucid records with parec, pw-record or arecord, and none of them is installed. Install pulseaudio-utils, pipewire or alsa-utils.",
+                done: false
+            )
+        } else if lucid_mic_devices() == 0 {
+            microphone = SetupCheck(
+                id: "microphone", title: "Microphone",
+                detail: "The sound system has no microphone to record from. Connect one, or choose one in the sound settings.",
+                done: false
+            )
+        } else {
+            microphone = SetupCheck(id: "microphone", title: "Microphone", detail: "Lucid can record from it, with \(recorder).", done: true)
+        }
+
+        var checks = [key, microphone]
+        if !lucid_can_type() {
+            checks.append(SetupCheck(
+                id: "typing", title: "Typing into other apps",
+                detail: wayland
+                    ? "A Wayland session does not let one app press keys in another, so Lucid leaves the text on the clipboard for you to paste. It can type for you if you allow it. " + Self.waylandAdvice
+                    : "The display does not let Lucid press keys in other apps, so it leaves the text on the clipboard for you to paste.",
+                done: false
+            ))
+        }
+        return checks
+    }
+    #endif
 
     func performSetupAction(_ id: String) {
+        #if os(Windows)
         switch id {
         case "sound": lucid_open("ms-settings:sound")
         case "microphone": lucid_open("ms-settings:privacy-microphone")
         default: break
         }
+        #endif
     }
 
     var opensAtLogin: Bool? { lucid_opens_at_login() }
 
     func setOpensAtLogin(_ on: Bool) -> String? {
-        lucid_set_opens_at_login(on) ? nil : "Windows did not let Lucid change that."
+        lucid_set_opens_at_login(on) ? nil : "Lucid could not change that."
     }
 
     var canChooseFiles: Bool { true }

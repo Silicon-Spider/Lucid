@@ -1,4 +1,4 @@
-import CLucidWin
+import CLucidDesk
 import Foundation
 import LucidApp
 import LucidCore
@@ -14,7 +14,7 @@ extension CleanupLevel {
     }
 }
 
-/// What the items of the tray menu do. Windows reports the number of the one chosen.
+/// What the items of the tray menu do. The desktop reports the number of the one chosen.
 private enum Command {
     static let open: Int32 = 1
     static let models: Int32 = 2
@@ -52,15 +52,15 @@ struct MenuLine: Equatable {
     }
 }
 
-/// The Windows app: the icon beside the clock, its menu, and Lucid's window. Dictation itself
-/// is `Desk`'s work, which is the same on every system.
+/// The app on Windows and on Linux: the icon beside the clock, its menu, and Lucid's window.
+/// Dictation itself is `Desk`'s work, which is the same on every system.
 ///
-/// Everything here runs on the main thread, where Windows delivers what happens.
-final class WindowsApp {
-    /// The one app, for what Windows calls back with. Plain C functions cannot carry it.
-    static var shared: WindowsApp?
+/// Everything here runs on the main thread, where the desktop delivers what happens.
+final class DesktopApp {
+    /// The one app, for what the desktop calls back with. Plain C functions cannot carry it.
+    static var shared: DesktopApp?
 
-    let shell = WindowsShell()
+    let shell = DesktopShell()
     let desk: Desk
     private var recentIDs: [UUID] = []
     private var pill: PillStatus = .hidden
@@ -72,16 +72,16 @@ final class WindowsApp {
         desk = try Desk(shell: shell, folder: folder, library: library, tracksProcesses: tracksProcesses)
     }
 
-    /// Starts everything that needs Windows. False when Windows would not give Lucid a window.
+    /// Starts everything that needs the desktop. False when it would not give Lucid a window.
     func start() -> Bool {
-        WindowsApp.shared = self
+        DesktopApp.shared = self
         var callbacks = LucidCallbacks(
-            key: { signal in WindowsApp.shared?.key(signal) },
-            wants_escape: { WindowsApp.shared?.desk.driver.isRecording ?? false },
-            wake: { WindowsApp.shared?.shell.mailbox.deliver() },
-            menu_opening: { WindowsApp.shared?.fillMenu() },
-            menu_chosen: { command in WindowsApp.shared?.choose(command) },
-            activated: { WindowsApp.shared?.openWindow("home") }
+            key: { signal in DesktopApp.shared?.key(signal) },
+            wants_escape: { DesktopApp.shared?.desk.driver.isRecording ?? false },
+            wake: { DesktopApp.shared?.shell.mailbox.deliver() },
+            menu_opening: { DesktopApp.shared?.fillMenu() },
+            menu_chosen: { command in DesktopApp.shared?.choose(command) },
+            activated: { DesktopApp.shared?.openWindow("home") }
         )
         guard lucid_start(&callbacks) else { return false }
         shell.useHotkey(desk.hotkey)
@@ -91,7 +91,7 @@ final class WindowsApp {
         }
         let mailbox = shell.mailbox
         desk.engines.onStatus { _ in
-            mailbox.post { WindowsApp.shared?.refreshTray() }
+            mailbox.post { DesktopApp.shared?.refreshTray() }
         }
         refreshTray()
         return true
@@ -101,6 +101,17 @@ final class WindowsApp {
     func run() -> Int32 {
         // Before the engines start: they are console programs, and would each open a window.
         lucid_hide_consoles()
+        #if !os(Windows)
+        // A plain `kill`, or signing out, would otherwise leave the engines running.
+        let signals = [SIGTERM, SIGINT].map { number -> DispatchSourceSignal in
+            signal(number, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
+            source.setEventHandler { lucid_quit() }
+            source.resume()
+            return source
+        }
+        defer { signals.forEach { $0.cancel() } }
+        #endif
         desk.start()
         if !desk.settings.current.welcomed {
             // The window opens by itself only the first time, to show how Lucid works.
@@ -111,7 +122,7 @@ final class WindowsApp {
         lucid_close_window(Self.windowTitle)
         desk.stop()
         lucid_stop()
-        WindowsApp.shared = nil
+        DesktopApp.shared = nil
         return code
     }
 
@@ -137,15 +148,24 @@ final class WindowsApp {
         case .starting: return "Starting the engines…"
         case .setupNeeded:
             return desk.engines.enginesMissing
-                ? "Setup needed: run scripts\\setup.ps1"
+                ? "Setup needed: run \(Self.setupScript)"
                 : "Setup needed: open Lucid to download the models"
         case .failed: return "The engines did not start"
         case .ready: return "Ready. Hold \(hotkeyTitle) and speak."
         }
     }
 
+    /// The script that installs the engines, as the user would type it.
+    static var setupScript: String {
+        #if os(Windows)
+        return "scripts\\setup.ps1"
+        #else
+        return "scripts/setup-linux.sh"
+        #endif
+    }
+
     private var hotkeyTitle: String {
-        WindowsHotkey(rawValue: desk.hotkey)?.title ?? WindowsHotkey.rightControl.title
+        DesktopHotkey(rawValue: desk.hotkey)?.title ?? DesktopHotkey.rightControl.title
     }
 
     private var needsAttention: Bool {
@@ -188,7 +208,7 @@ final class WindowsApp {
         lines.append(.closeSubmenu)
 
         lines.append(.submenu("Dictation Key"))
-        for (index, hotkey) in WindowsHotkey.allCases.enumerated() {
+        for (index, hotkey) in DesktopHotkey.allCases.enumerated() {
             lines.append(.action(Command.firstHotkey + Int32(index), hotkey.title, checked: desk.hotkey == hotkey.rawValue))
         }
         lines.append(.closeSubmenu)
@@ -219,8 +239,11 @@ final class WindowsApp {
     /// One line for the menu: the start of the text, or the reason it failed.
     static func menuTitle(for entry: HistoryEntry) -> String {
         guard let result = entry.result else { return "Failed: \(entry.failure ?? "unknown reason")" }
+        var line = result.finalText.replacingOccurrences(of: "\n", with: " ")
+        #if os(Windows)
         // Windows reads "&" in a menu as "underline the next letter".
-        let line = result.finalText.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "&", with: "&&")
+        line = line.replacingOccurrences(of: "&", with: "&&")
+        #endif
         return line.count > 60 ? String(line.prefix(57)) + "…" : line
     }
 
@@ -245,8 +268,8 @@ final class WindowsApp {
             desk.settings.update { $0.level = level }
             let engines = desk.engines
             Task { await engines.update(level: level) }
-        case Command.firstHotkey..<(Command.firstHotkey + Int32(WindowsHotkey.allCases.count)):
-            let hotkey = WindowsHotkey.allCases[Int(command - Command.firstHotkey)]
+        case Command.firstHotkey..<(Command.firstHotkey + Int32(DesktopHotkey.allCases.count)):
+            let hotkey = DesktopHotkey.allCases[Int(command - Command.firstHotkey)]
             desk.settings.update { $0.hotkey = hotkey.rawValue }
             shell.useHotkey(hotkey.rawValue)
             refreshTray()
@@ -264,14 +287,23 @@ final class WindowsApp {
 
     /// Opens Lucid's window at one of its parts, or brings it forward and turns it to that part.
     func openWindow(_ section: String) {
-        if desk.windowIsOpen, lucid_focus_window(Self.windowTitle) {
-            desk.turn(to: section)
-            return
+        if desk.windowIsOpen {
+            if lucid_focus_window(Self.windowTitle) {
+                desk.turn(to: section)
+                return
+            }
+            if lucid_is_wayland() {
+                // Wayland does not let Lucid bring its window forward. Opening another
+                // would leave two, so the one that is open is turned to the right part.
+                desk.turn(to: section)
+                lucid_tray_notify("Lucid", "Lucid's window is already open.")
+                return
+            }
         }
         // The browser keeps the window's size and place here, apart from the user's own browsing.
         let profile = EngineConfig.supportDirectory.appendingPathComponent("window").path
         if !lucid_open_window(desk.windowAddress(section: section), profile) {
-            lucid_alert("Lucid", "Lucid could not open its window. It needs Microsoft Edge, or another browser.")
+            lucid_alert("Lucid", "Lucid could not open its window. It needs a web browser.")
         }
     }
 }

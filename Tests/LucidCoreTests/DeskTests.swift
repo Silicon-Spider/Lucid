@@ -457,7 +457,7 @@ func deskTests() async {
         }
     }
 
-    suite("Apps on Windows") {
+    suite("Apps on Windows and Linux") {
         test("knows the kind of app from its program name") {
             expectEqual(AppCategory.forProgram("OUTLOOK.EXE"), .email)
             expectEqual(AppCategory.forProgram("slack.exe"), .chat)
@@ -468,6 +468,10 @@ func deskTests() async {
             expectEqual(AppCategory.forApp("com.apple.mail"), .email)
             expectEqual(AppCategory.forApp("ms-teams.exe"), .chat)
             expectEqual(AppCategory.forApp("something.else"), .other)
+            expectEqual(AppCategory.forApp("gnome-terminal-server"), .code)
+            expectEqual(AppCategory.forApp("telegram-desktop"), .chat)
+            expectEqual(AppCategory.forApp("evolution"), .email)
+            expectEqual(AppCategory.forApp("firefox"), .other)
         }
 
         test("settings from another version of Lucid still load") {

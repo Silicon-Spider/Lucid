@@ -1,6 +1,6 @@
 #!/bin/bash
-# Tests the part of Lucid that talks to Windows (Sources/CLucidWin) without a Windows PC:
-# builds it for Windows with MinGW and runs Tests/CLucidWinTests under Wine, on a display
+# Tests the part of Lucid that talks to Windows (Sources/CLucidDesk/windows) without a
+# Windows PC: builds it for Windows with MinGW and runs Tests/CLucidDeskTests/windows.c under Wine, on a display
 # that only exists in memory.
 #
 # It checks the pill, the tray icon and its menu, the dictation key, the clipboard, and
@@ -38,7 +38,7 @@ trap cleanup EXIT
 
 echo "build    the Windows layer and its tests, for Windows"
 x86_64-w64-mingw32-gcc -std=c11 -O1 -Wall -Wextra -Wshadow -Wconversion -Wno-sign-conversion -Werror \
-    -ISources/CLucidWin/include Sources/CLucidWin/*.c Tests/CLucidWinTests/harness.c -o "$WORK/harness.exe" \
+    -ISources/CLucidDesk/include Sources/CLucidDesk/windows/*.c Tests/CLucidDeskTests/windows.c -o "$WORK/harness.exe" \
     -luser32 -lgdi32 -lshell32 -lwinmm -lcomdlg32 -ladvapi32 -lversion
 
 export WINEPREFIX="$WORK/prefix" WINEDEBUG=-all

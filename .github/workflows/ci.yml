@@ -46,14 +46,22 @@ jobs:
           path: ${{ runner.temp }}/ui
           if-no-files-found: ignore
 
-  # Everything but the apps, which need a Mac or Windows: the dictation pipeline, the
-  # engines, lucid-cli and the tests.
+  # The Linux app, lucid-cli and the tests.
   linux:
     name: Build and test on Linux
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+
+      # What the app is built on, and what scripts/with-test-desktop.sh needs to make a
+      # desktop that only exists in memory to try it on.
+      - name: Install what the app needs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev libayatana-appindicator3-dev libxi-dev libxtst-dev \
+            xvfb openbox dbus-x11 xcompmgr pulseaudio pulseaudio-utils xterm imagemagick
 
       - name: Swift version
         run: swift --version
@@ -63,6 +71,72 @@ jobs:
 
       - name: Unit tests
         run: scripts/test.sh
+
+      # The part of the app that talks to the desktop, on its own: the pill, the tray icon
+      # and its menu, the dictation key, the clipboard, the microphone, and typing into
+      # another program's window and into a terminal.
+      - name: Test the Linux layer
+        timeout-minutes: 5
+        run: scripts/test-linux-layer.sh pictures
+
+      # The app itself, started the way a script can start it: it tries each part that needs
+      # a desktop and writes down what it found.
+      - name: Try the app
+        timeout-minutes: 5
+        run: |
+          scripts/with-test-desktop.sh "$(swift build --show-bin-path)/Lucid" --self-test "$PWD/linux-layer-pictures/self-test.txt"
+
+      # Pictures of the pill and the tray icon as they were drawn.
+      - name: Upload the pictures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: linux-layer-pictures
+          if-no-files-found: ignore
+
+  # The real thing on Linux: the engines and models that scripts/setup-linux.sh installs, and
+  # the app itself on a desktop that only exists in memory, typing what a synthesised voice
+  # says into an editor.
+  linux-dictation:
+    name: Dictate on Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install what the app needs
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgtk-3-dev libayatana-appindicator3-dev libxi-dev libxtst-dev \
+            xvfb openbox dbus-x11 xcompmgr pulseaudio pulseaudio-utils imagemagick \
+            espeak-ng xdotool curl cmake g++
+
+      # The engines, one of them built from its source, and about 600 MB of models. Kept
+      # between runs, so that is done once.
+      - name: Keep the engines and models
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/Lucid
+          key: lucid-linux-${{ hashFiles('scripts/setup-linux.sh') }}
+
+      # A small speech model: the machine has no graphics card to speed up a large one.
+      - name: Set up
+        run: scripts/setup-linux.sh --speech-model ggml-base.en.bin
+
+      - name: Dictate synthesised speech into an editor
+        timeout-minutes: 10
+        run: scripts/integration-linux.sh pictures
+
+      # Pictures of the screen while speaking and after.
+      - name: Upload the pictures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-app
+          path: linux-app-pictures
+          if-no-files-found: ignore
 
   # The Windows app, lucid-cli and the tests.
   windows:
@@ -95,7 +169,7 @@ jobs:
         timeout-minutes: 5
         run: |
           New-Item -ItemType Directory -Force windows-pictures | Out-Null
-          clang -std=c11 -O1 -D_CRT_SECURE_NO_WARNINGS -ISources/CLucidWin/include (Get-ChildItem Sources/CLucidWin/*.c) Tests/CLucidWinTests/harness.c -o harness.exe -luser32 -lgdi32 -lshell32 -lwinmm -lcomdlg32 -ladvapi32 -lversion
+          clang -std=c11 -O1 -D_CRT_SECURE_NO_WARNINGS -ISources/CLucidDesk/include (Get-ChildItem Sources/CLucidDesk/windows/*.c) Tests/CLucidDeskTests/windows.c -o harness.exe -luser32 -lgdi32 -lshell32 -lwinmm -lcomdlg32 -ladvapi32 -lversion
           if ($LASTEXITCODE -ne 0) { throw 'The Windows layer did not build.' }
           .\harness.exe windows-pictures
           if ($LASTEXITCODE -ne 0) { throw 'The Windows layer failed its checks.' }

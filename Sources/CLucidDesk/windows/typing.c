@@ -281,6 +281,10 @@ static bool is_down(int virtual_key) {
     return (GetAsyncKeyState(virtual_key) & 0x8000) != 0;
 }
 
+bool lucid_can_type(void) {
+    return true;
+}
+
 bool lucid_paste(const char *text) {
     HWND front = GetForegroundWindow();
     if (!front || is_shell(front) || in_password_box(front)) {

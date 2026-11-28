@@ -262,7 +262,7 @@ extension Desk {
         #elseif os(macOS)
         return "In Terminal, from the Lucid folder, run scripts/setup.sh. It installs them and downloads the models. Then quit and reopen Lucid."
         #else
-        return "Put whisper-server and llama-server on the PATH, or in folders of their own inside Lucid's engines folder. Then quit and reopen Lucid."
+        return "In a terminal, from the Lucid folder, run scripts/setup-linux.sh. It installs them and downloads the models. Then quit and reopen Lucid."
         #endif
     }
 
