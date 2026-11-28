@@ -8,7 +8,7 @@ import LucidEngines
 ///   .redirect  send the client to this path instead
 ///   .link      add a Link header pointing at this address as the next page
 ///   .norange   ignore Range headers and always send the whole file
-///   .cut       on a request from the start, send only this many bytes, then hang up
+///   .cut       on a request from the start, send only this many bytes, wait a moment, then hang up
 ///   .slow      pause this many seconds after every 64 KB
 /// Every Range header received for a file is appended to its .ranges file, or "none".
 private let fakeHubScript = #"""
@@ -65,6 +65,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if side("cut") is not None and start == 0:
             self.wfile.write(body[:int(side("cut"))])
             self.wfile.flush()
+            # Give the client time to take in what was sent. When a connection drops at once, a
+            # client may report the loss before it hands over the last bytes it received.
+            time.sleep(0.5)
             return
         pause = float(side("slow") or 0)
         for i in range(0, len(body), 65536):
@@ -338,11 +341,14 @@ func downloadTests() async {
                     expectTrue(false, "unexpected error \(error)")
                 }
             }
-            expectEqual(library.partialBytes(of: "resumed.gguf"), 20000)
+            // How much was kept is up to the system: all of what was sent, or a little less if
+            // the connection dropped before the last of it was handed over.
+            let kept = library.partialBytes(of: "resumed.gguf") ?? 0
+            expectTrue(kept > 0 && kept <= 20000, "kept \(kept) bytes of the 20000 sent")
 
             _ = try await library.download(remote, from: fake.hub)
             expectEqual(try Data(contentsOf: folder.appendingPathComponent("resumed.gguf")), model)
-            expectEqual(fake.ranges(path), ["none", "bytes=20000-"])
+            expectEqual(fake.ranges(path), ["none", "bytes=\(kept)-"])
         }
 
         await asyncTest("starts again when the server ignores the range") {
