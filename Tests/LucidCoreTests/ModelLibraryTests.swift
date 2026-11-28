@@ -323,6 +323,8 @@ func modelLibraryTests() {
             expectError(.notFound("../outside.gguf")) { try library.remove("../outside.gguf") }
         }
 
+        // Making a link needs special rights on Windows, so this is checked on macOS and Linux.
+        #if !os(Windows)
         test("deletes a link, never the model it points to") {
             let folder = temporaryFolder()
             let elsewhere = temporaryFolder()
@@ -340,6 +342,7 @@ func modelLibraryTests() {
             expectEqual(library.models(), [])
             expectTrue(FileManager.default.fileExists(atPath: target.path), "the linked model was deleted")
         }
+        #endif
 
         test("gives a model a new name, and keeps it") {
             let folder = temporaryFolder()

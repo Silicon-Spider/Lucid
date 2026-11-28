@@ -20,6 +20,8 @@ struct SectionNote: View {
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.leading)
             .frame(maxWidth: .infinity, alignment: .leading)
+            // In line with the section's heading, which is set in from the edge.
+            .padding(.leading, 10)
     }
 }
 

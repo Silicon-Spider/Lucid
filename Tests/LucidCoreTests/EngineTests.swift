@@ -18,7 +18,57 @@ func engineTests() async {
             expectEqual(config.speechModelURL.lastPathComponent, "ggml-large-v3-turbo-q5_0.bin")
             expectEqual(config.cleanupModelURL.lastPathComponent, "s1-mini-q4_k_m.gguf")
             expectEqual(config.cleanupModel.style, .s1)
+            expectEqual(Array(config.modelsDirectory.pathComponents.suffix(2)), ["Lucid", "models"])
+            #if os(macOS)
             expectTrue(config.modelsDirectory.path.hasSuffix("Library/Application Support/Lucid/models"))
+            expectTrue(config.logsDirectory.path.hasSuffix("Library/Logs/Lucid"))
+            #else
+            // Off the Mac there is no Library folder, so the logs sit beside the models.
+            expectEqual(Array(config.logsDirectory.pathComponents.suffix(2)), ["Lucid", "logs"])
+            #endif
+        }
+
+        test("looks for the engines where each system keeps them") {
+            let config = EngineConfig.standard()
+            #if os(Windows)
+            expectEqual(config.whisperServer.lastPathComponent, "whisper-server.exe")
+            expectEqual(config.llamaServer.lastPathComponent, "llama-server.exe")
+            #else
+            expectEqual(config.whisperServer.lastPathComponent, "whisper-server")
+            expectEqual(config.llamaServer.lastPathComponent, "llama-server")
+            #endif
+            expectEqual(Array(EngineConfig.enginesDirectory.pathComponents.suffix(2)), ["Lucid", "engines"])
+            #if !os(macOS)
+            // With no engine installed, Lucid says to put each in a folder of its own.
+            if !FileManager.default.isExecutableFile(atPath: config.whisperServer.path) {
+                expectEqual(
+                    Array(config.whisperServer.pathComponents.suffix(3).prefix(2)), ["engines", "whisper-server"]
+                )
+            }
+            #endif
+        }
+
+        test("finds an engine unzipped anywhere in the engines folder") {
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("lucid-engines-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: folder) }
+            let files = FileManager.default
+            // Any program will do as a stand-in: what matters is where it is and what it is called.
+            let program = TestTools.failing.executable
+            let name = "stand-in-engine" + (program.pathExtension.isEmpty ? "" : "." + program.pathExtension)
+            for place in ["whisper/Release", "llama", "too/deep/for/lucid/to/look"] {
+                let home = folder.appendingPathComponent(place)
+                try files.createDirectory(at: home, withIntermediateDirectories: true)
+            }
+            expectEqual(EngineConfig.findInEngines(name, under: folder), nil)
+            try files.copyItem(at: program, to: folder.appendingPathComponent("too/deep/for/lucid/to/look").appendingPathComponent(name))
+            expectEqual(EngineConfig.findInEngines(name, under: folder), nil)
+            try files.copyItem(at: program, to: folder.appendingPathComponent("whisper/Release").appendingPathComponent(name))
+            expectEqual(
+                EngineConfig.findInEngines(name, under: folder)?.pathComponents.suffix(3).joined(separator: "/"),
+                "whisper/Release/" + name
+            )
+            expectEqual(EngineConfig.findInEngines("something-else", under: folder), nil)
+            expectEqual(EngineConfig.findInEngines(name, under: folder.appendingPathComponent("missing")), nil)
         }
 
         test("reports what is missing") {
@@ -37,7 +87,7 @@ func engineTests() async {
             defer { try? FileManager.default.removeItem(at: log) }
             let server = ServerProcess(
                 name: "test server",
-                executable: URL(fileURLWithPath: "/usr/bin/python3"),
+                executable: TestTools.python,
                 arguments: ["-m", "http.server", String(port), "--bind", "127.0.0.1"],
                 port: port,
                 healthPath: "/",
@@ -56,8 +106,8 @@ func engineTests() async {
             defer { try? FileManager.default.removeItem(at: log) }
             let server = ServerProcess(
                 name: "broken server",
-                executable: URL(fileURLWithPath: "/usr/bin/false"),
-                arguments: [],
+                executable: TestTools.failing.executable,
+                arguments: TestTools.failing.arguments,
                 port: try ServerProcess.freePort(),
                 healthPath: "/",
                 logURL: log
@@ -77,8 +127,9 @@ func engineTests() async {
 
         test("pid file cleanup leaves unrelated processes alone") {
             let url = temporaryFile(".pid")
-            PidFile.write([getpid()], to: url)
-            expectEqual(PidFile.read(at: url), [getpid()])
+            let own = ProcessInfo.processInfo.processIdentifier
+            PidFile.write([own], to: url)
+            expectEqual(PidFile.read(at: url), [own])
             // This test process is not an engine, so it must survive the cleanup.
             PidFile.killStale(at: url, names: ["whisper-server", "llama-server"])
             expectFalse(FileManager.default.fileExists(atPath: url.path))

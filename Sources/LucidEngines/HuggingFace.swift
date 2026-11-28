@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// A model file on Hugging Face that Lucid could download.
 public struct RemoteModel: Equatable, Identifiable, Sendable {

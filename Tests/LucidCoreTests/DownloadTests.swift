@@ -99,7 +99,7 @@ private final class FakeHub {
         let port = try ServerProcess.freePort()
         let server = ServerProcess(
             name: "fake Hugging Face",
-            executable: URL(fileURLWithPath: "/usr/bin/python3"),
+            executable: TestTools.python,
             arguments: [script.path, root.appendingPathComponent("site").path, String(port)],
             port: port,
             healthPath: "/",

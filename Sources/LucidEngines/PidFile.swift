@@ -24,16 +24,10 @@ public enum PidFile {
     /// something unrelated.
     public static func killStale(at url: URL, names: Set<String>) {
         for pid in read(at: url) where pid > 0 {
-            if let name = executableName(of: pid), names.contains(name) {
-                kill(pid, SIGTERM)
+            if let name = Platform.programName(ofProcess: pid), names.contains(name) {
+                Platform.terminate(pid: pid)
             }
         }
         remove(at: url)
-    }
-
-    static func executableName(of pid: Int32) -> String? {
-        var buffer = [CChar](repeating: 0, count: 4096)
-        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
-        return URL(fileURLWithPath: String(cString: buffer)).lastPathComponent
     }
 }

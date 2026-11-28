@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 /// Downloads one file into a `.part` file, continuing from whatever is already in it.
 ///
@@ -231,7 +234,7 @@ final class FileDownload: NSObject, URLSessionDataDelegate, @unchecked Sendable 
     private func truncatePartial() {
         try? handle?.close()
         handle = nil
-        FileManager.default.createFile(atPath: partial.path, contents: nil)
+        _ = FileManager.default.createFile(atPath: partial.path, contents: nil)
         offset = 0
         received = 0
     }
