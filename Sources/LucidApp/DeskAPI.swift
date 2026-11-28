@@ -101,9 +101,16 @@ struct DeskSnapshot: Encodable {
     var settings: Settings
     var models: Models
     var dictionary: Dictionary
+    /// Which part of the window the app last asked for, from its menu. The number goes up each time.
+    struct GoTo: Encodable {
+        var section: String
+        var serial: Int
+    }
+
     var history: [Dictation]
     /// What is in use, for the Home page.
     var inUse: [[String]]
+    var goTo: GoTo
 }
 
 extension Desk {
@@ -188,7 +195,8 @@ extension Desk {
                     hasAudio: history.hasAudio(entry)
                 )
             },
-            inUse: inUse
+            inUse: inUse,
+            goTo: { let wanted = wantedSection; return .init(section: wanted.section, serial: wanted.serial) }()
         )
     }
 
@@ -383,6 +391,7 @@ extension Desk {
         if request.method == "GET" {
             switch request.path {
             case "/api/state":
+                noteWindowAsked()
                 return .json(snapshot())
             case "/api/models/removal":
                 guard let message = models.removalMessage(for: request.query["file"] ?? "", choices: settings.current.models) else {

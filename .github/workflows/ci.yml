@@ -46,8 +46,8 @@ jobs:
           path: ${{ runner.temp }}/ui
           if-no-files-found: ignore
 
-  # Everything but the menu-bar app, which is built on frameworks only a Mac has:
-  # the dictation pipeline, the engines, lucid-cli and the tests.
+  # Everything but the apps, which need a Mac or Windows: the dictation pipeline, the
+  # engines, lucid-cli and the tests.
   linux:
     name: Build and test on Linux
     runs-on: ubuntu-24.04
@@ -64,6 +64,7 @@ jobs:
       - name: Unit tests
         run: scripts/test.sh
 
+  # The Windows app, lucid-cli and the tests.
   windows:
     name: Build and test on Windows
     runs-on: windows-latest
@@ -87,6 +88,37 @@ jobs:
 
       - name: Unit tests
         run: swift run LucidCoreTests
+
+      # The part of the app that talks to Windows, on its own: the pill, the tray icon and its
+      # menu, the dictation key, the clipboard, and typing into another program's window.
+      - name: Test the Windows layer
+        timeout-minutes: 5
+        run: |
+          New-Item -ItemType Directory -Force windows-pictures | Out-Null
+          clang -std=c11 -O1 -D_CRT_SECURE_NO_WARNINGS -ISources/CLucidWin/include (Get-ChildItem Sources/CLucidWin/*.c) Tests/CLucidWinTests/harness.c -o harness.exe -luser32 -lgdi32 -lshell32 -lwinmm -lcomdlg32 -ladvapi32 -lversion
+          if ($LASTEXITCODE -ne 0) { throw 'The Windows layer did not build.' }
+          .\harness.exe windows-pictures
+          if ($LASTEXITCODE -ne 0) { throw 'The Windows layer failed its checks.' }
+
+      # The app itself, started the way a script can start it: it tries each part that needs
+      # Windows and writes down what it found.
+      - name: Try the app
+        timeout-minutes: 5
+        run: |
+          $app = Join-Path (swift build --show-bin-path) 'Lucid.exe'
+          $report = Join-Path $PWD 'windows-pictures\self-test.txt'
+          $run = Start-Process $app -ArgumentList '--self-test', "`"$report`"" -Wait -PassThru
+          if (Test-Path $report) { Get-Content $report }
+          if ($run.ExitCode -ne 0) { throw "The app failed its self-test (exit code $($run.ExitCode))." }
+
+      # Pictures of the pill and the tray icon as Windows drew them.
+      - name: Upload the pictures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: windows-pictures
+          if-no-files-found: ignore
 
   # The real thing on Windows: the engines and models that scripts\setup.ps1 installs, turning
   # synthesised speech into clean text. The unit tests above use stand-ins for both.

@@ -305,6 +305,19 @@ func deskTests() async {
             expectEqual(refused, 403)
         }
 
+        await asyncTest("knows when a window is open, and can turn it to another part") {
+            let (desk, folder) = try makeDesk()
+            defer { try? FileManager.default.removeItem(at: folder) }
+            expectFalse(desk.windowIsOpen)
+            let (_, first) = await ask(desk, "/api/state")
+            expectTrue(desk.windowIsOpen, "a page that asks is an open window")
+            expectEqual(part(first, "goTo")["serial"] as? Int, 0)
+            desk.turn(to: "models")
+            let (_, second) = await ask(desk, "/api/state")
+            expectEqual(part(second, "goTo")["section"] as? String, "models")
+            expectEqual(part(second, "goTo")["serial"] as? Int, 1)
+        }
+
         await asyncTest("describes the app: setup, what is in use, and the models") {
             let (desk, folder) = try makeDesk()
             defer { try? FileManager.default.removeItem(at: folder) }

@@ -1,12 +1,15 @@
-# Installs what lucid-cli needs on Windows: the speech and cleanup engines, and the models.
+# Sets Lucid up on Windows: installs the speech and cleanup engines, downloads the models,
+# builds the app, and adds it to the Start menu.
 # Safe to run again: what is already there is skipped, and model downloads continue.
 #
 #   scripts\setup.ps1                                the engines and Lucid's two models (about 1 GB)
 #   scripts\setup.ps1 -WithGeneral                   also Qwen 3.5 4B (2.6 GB), for the Medium level
 #   scripts\setup.ps1 -SpeechModel ggml-base.en.bin  a smaller, faster speech model instead
+#   scripts\setup.ps1 -NoApp                         only what lucid-cli needs, without the app
 param(
     [switch]$WithGeneral,
-    [string]$SpeechModel = 'ggml-large-v3-turbo-q5_0.bin'
+    [string]$SpeechModel = 'ggml-large-v3-turbo-q5_0.bin',
+    [switch]$NoApp
 )
 
 $ErrorActionPreference = 'Stop'
@@ -106,3 +109,23 @@ if ($WithGeneral) { Get-Model 'unsloth/Qwen3.5-4B-GGUF' 'Qwen3.5-4B-Q4_K_M.gguf'
 
 Write-Host ''
 Invoke-Program { & $cli doctor --speech-model $SpeechModel } 'Setup did not finish. See what is missing above.'
+
+if (-not $NoApp) {
+    Write-Host ''
+    Write-Host 'build    Lucid'
+    Invoke-Program { swift build -c release --product Lucid } 'Lucid did not build.'
+    $app = Join-Path (swift build -c release --show-bin-path) 'Lucid.exe'
+
+    # A Start menu entry, so Lucid can be opened like any other app.
+    $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'Lucid.lnk'
+    $link = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut)
+    $link.TargetPath = $app
+    $link.WorkingDirectory = Split-Path $app
+    $link.Description = 'Dictation that runs on this PC'
+    $link.Save()
+
+    Write-Host ''
+    Write-Host 'Lucid is ready. Open it from the Start menu, or run:'
+    Write-Host "  $app"
+    Write-Host 'It sits beside the clock. Hold Right Ctrl and speak, then let go.'
+}

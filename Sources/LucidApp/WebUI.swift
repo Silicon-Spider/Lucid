@@ -8,6 +8,7 @@ enum WebUI {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lucid</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23151515'/%3E%3Cg fill='%23fff'%3E%3Crect x='5' y='12' width='3' height='8' rx='1.5'/%3E%3Crect x='10' y='8' width='3' height='16' rx='1.5'/%3E%3Crect x='14.5' y='5' width='3' height='22' rx='1.5'/%3E%3Crect x='19' y='8' width='3' height='16' rx='1.5'/%3E%3Crect x='24' y='12' width='3' height='8' rx='1.5'/%3E%3C/g%3E%3C/svg%3E">
 <style>
 :root {
   color-scheme: light dark;
@@ -85,7 +86,7 @@ input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--accent);
 <script>
 "use strict";
 const TABS = [["home", "Home"], ["models", "Models"], ["dictionary", "Dictionary"], ["history", "History"], ["settings", "Settings"], ["about", "About"]];
-let state = null, shown = "", tab = "home", pending = null;
+let state = null, shown = "", tab = "home", pending = null, turned = null;
 const ui = { drafts: {}, renaming: null, lookup: null, lookingUp: false, adding: null, message: null, busy: {} };
 
 // The key comes after the # in the address, which a browser never sends anywhere.
@@ -131,7 +132,17 @@ async function act(path, body, quiet) {
 
 async function refresh() {
   if (!key) return lost();
-  try { state = await api("/api/state"); draw(false); } catch (error) { /* Lucid may be restarting. Try again next time. */ }
+  try {
+    state = await api("/api/state");
+    // Lucid's menu can ask an open window to turn to one of its parts.
+    const turn = state.goTo || {};
+    if (turned === null) turned = turn.serial;
+    else if (turn.serial !== turned) {
+      turned = turn.serial;
+      if (TABS.some(t => t[0] === turn.section) && turn.section !== tab) return go(turn.section);
+    }
+    draw(false);
+  } catch (error) { /* Lucid may be restarting. Try again next time. */ }
 }
 
 // Drawing the page again must not disturb what is being typed.

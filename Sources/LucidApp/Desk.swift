@@ -129,6 +129,10 @@ public final class Desk: @unchecked Sendable {
     public let key: String
     public private(set) var server: LocalServer!
 
+    private let windowLock = NSLock()
+    private var lastAsked: Date?
+    private var wanted = (section: "home", serial: 0)
+
     /// `folder` is where settings, history and the dictionary are kept. Tests pass their own.
     public init(
         shell: DeskShell,
@@ -177,6 +181,32 @@ public final class Desk: @unchecked Sendable {
     /// browser keeps to itself: it is never sent anywhere or written to a log.
     public func windowAddress(section: String = "home") -> String {
         "\(server.address)/#\(section)&key=\(key)"
+    }
+
+    /// True while a window is open. Its page asks how things are about once a second.
+    public var windowIsOpen: Bool {
+        windowLock.lock()
+        defer { windowLock.unlock() }
+        return lastAsked.map { Date().timeIntervalSince($0) < 3 } ?? false
+    }
+
+    /// Has an open window turn to one of its parts, such as "models". It follows within a second.
+    public func turn(to section: String) {
+        windowLock.lock()
+        wanted = (section, wanted.serial + 1)
+        windowLock.unlock()
+    }
+
+    var wantedSection: (section: String, serial: Int) {
+        windowLock.lock()
+        defer { windowLock.unlock() }
+        return wanted
+    }
+
+    func noteWindowAsked() {
+        windowLock.lock()
+        lastAsked = Date()
+        windowLock.unlock()
     }
 
     /// The key the dictation key is set to, among those this system offers.
