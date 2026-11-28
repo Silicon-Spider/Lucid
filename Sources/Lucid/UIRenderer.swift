@@ -23,10 +23,11 @@ enum UIRenderer {
 
     @MainActor
     private static func pillViews() -> [(String, AnyView)] {
-        func pill(_ state: PillState, level: Float = 0) -> AnyView {
+        func pill(_ state: PillState, level: Float = 0, preview: String = "") -> AnyView {
             let model = PillModel()
             model.state = state
             model.level = level
+            model.preview = preview
             // A mid-grey backdrop shows the pill's edge the way a real desktop would.
             return AnyView(
                 PillView(model: model)
@@ -37,7 +38,9 @@ enum UIRenderer {
         return [
             ("pill-recording-quiet", pill(.recording, level: 0.01)),
             ("pill-recording-loud", pill(.recording, level: 0.12)),
+            ("pill-recording-words", pill(.recording, level: 0.1, preview: "…we could meet at three at the usual place")),
             ("pill-hands-free", pill(.handsFree, level: 0.06)),
+            ("pill-hands-free-words", pill(.handsFree, level: 0.06, preview: "So I was thinking")),
             ("pill-processing", pill(.processing)),
             ("pill-message", pill(.message("Copied. Press ⌘V"))),
         ]

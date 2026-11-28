@@ -5,6 +5,24 @@ import UniformTypeIdentifiers
 
 // The parts of Lucid's window other than Home. `MainView` shows one at a time.
 
+/// A note under a section. A grouped form would set it against the right-hand edge, which
+/// reads badly over several lines, so it is set against the left like the rest of the page.
+struct SectionNote: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Text(text)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 /// Settings: the dictation key, the cleanup level, privacy and startup.
 struct GeneralTab: View {
     @ObservedObject var settings: AppSettings
@@ -101,6 +119,13 @@ struct GeneralTab: View {
                         .font(.callout)
                         .foregroundStyle(.orange)
                 }
+            }
+
+            Section("While you speak") {
+                Toggle("Show the words as you speak", isOn: $settings.livePreview)
+                Text("The pill shows the last few words Lucid has heard. This is a rough first hearing: the text that is inserted is worked out from the whole recording once you stop. It can add a moment to the wait after you let go.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Privacy") {
@@ -227,7 +252,7 @@ struct ModelsTab: View {
             } header: {
                 Text("Speech recognition")
             } footer: {
-                Text("Whisper models for whisper.cpp, named like ggml-small.en.bin. Smaller models are faster but mishear more. Lucid listens for English.")
+                SectionNote("Whisper models for whisper.cpp, named like ggml-small.en.bin. Smaller models are faster but mishear more. Lucid listens for English.")
             }
 
             Section {
@@ -251,7 +276,7 @@ struct ModelsTab: View {
             } header: {
                 Text("Cleanup")
             } footer: {
-                Text("Medium needs a model that uses Lucid's prompt. If a model adds words, answers a question or drops part of what you said, Lucid uses its rules instead, so a dictation is never lost.")
+                SectionNote("Medium needs a model that uses Lucid's prompt. If a model adds words, answers a question or drops part of what you said, Lucid uses its rules instead, so a dictation is never lost.")
             }
 
             Section {
@@ -287,7 +312,7 @@ struct ModelsTab: View {
             } header: {
                 Text("Models on this Mac")
             } footer: {
-                Text("These models use \(DownloadRow.size(library.totalBytes)) of disk. Lucid keeps its own copy of each model you add, in its models folder. Speech models come from huggingface.co/ggerganov/whisper.cpp. A cleanup model must be a single .gguf file.")
+                SectionNote("These models use \(DownloadRow.size(library.totalBytes)) of disk. Lucid keeps its own copy of each model you add, in its models folder. Speech models come from huggingface.co/ggerganov/whisper.cpp. A cleanup model must be a single .gguf file.")
             }
 
             Section {
@@ -325,7 +350,7 @@ struct ModelsTab: View {
             } header: {
                 Text("Download from Hugging Face")
             } footer: {
-                Text("Downloads come straight from huggingface.co, and Lucid sends nothing else. A download that stops continues where it left off.")
+                SectionNote("Downloads come straight from huggingface.co, and Lucid sends nothing else. A download that stops continues where it left off.")
             }
 
             Section {
@@ -645,7 +670,7 @@ struct DictionaryTab: View {
             } header: {
                 Text("Words to spell exactly")
             } footer: {
-                Text("Names, products and jargon, written the way you want them. For example: GitHub.")
+                SectionNote("Names, products and jargon, written the way you want them. For example: GitHub.")
             }
 
             Section {
@@ -677,7 +702,7 @@ struct DictionaryTab: View {
             } header: {
                 Text("Corrections")
             } footer: {
-                Text("When Lucid keeps mishearing something, say what to write instead.")
+                SectionNote("When Lucid keeps mishearing something, say what to write instead.")
             }
         }
         .formStyle(.grouped)
@@ -808,7 +833,7 @@ struct AboutTab: View {
             } header: {
                 Text("Built with")
             } footer: {
-                Text("Lucid is free software under the GNU General Public License, version 3.")
+                SectionNote("Lucid is free software under the GNU General Public License, version 3.")
             }
         }
         .formStyle(.grouped)

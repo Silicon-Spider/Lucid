@@ -43,6 +43,20 @@ final class AudioRecorder {
         self.engine = engine
     }
 
+    /// How much has been recorded so far, in seconds.
+    var recordedSeconds: Double {
+        lock.lock()
+        defer { lock.unlock() }
+        return Double(samples.count) / outputFormat.sampleRate
+    }
+
+    /// The most recent audio, at most `seconds` of it, while recording carries on.
+    func latest(seconds: Double) -> [Int16] {
+        lock.lock()
+        defer { lock.unlock() }
+        return Array(samples.suffix(max(0, Int(seconds * outputFormat.sampleRate))))
+    }
+
     /// Stops recording and returns everything captured.
     @discardableResult
     func stop() -> [Int16] {

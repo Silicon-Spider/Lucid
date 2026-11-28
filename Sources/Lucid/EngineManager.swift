@@ -121,6 +121,13 @@ final class EngineManager: ObservableObject {
         _ = done.wait(timeout: .now() + 4)
     }
 
+    /// What the speech engine hears in the recording so far, to show while the user is still
+    /// speaking. Nil when it cannot say: a preview is never worth an error or a restart.
+    func preview(wav: Data, prompt: String) async -> String? {
+        guard status == .ready, let transcriber = try? await supervisor.transcriber() else { return nil }
+        return try? await transcriber.transcribe(wav: wav, prompt: prompt)
+    }
+
     /// Turns a recording into cleaned text. Restarts an engine first if one has stopped.
     func dictate(wav: Data, context: PipelineContext) async throws -> DictationOutcome {
         try await supervisor.recover()

@@ -68,6 +68,11 @@ in the Accessibility list.
 A small pill at the bottom of the screen shows bars while it listens and dots while it
 works. If there is nowhere to type, the text is left on the clipboard and the pill says so.
 
+While you speak, the pill also shows the last few words Lucid has heard, about once a
+second. This is a rough first hearing. The text that is inserted is worked out from the
+whole recording once you stop, and then cleaned up. It can add a moment to the wait after
+you let go, so you can switch it off under Settings.
+
 ### Lucid's window
 
 Everything else is in one window. Choose Open Lucid from the menu-bar icon. Its parts are
