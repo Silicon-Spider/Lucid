@@ -91,20 +91,20 @@ enum SelfTest {
         lucid_pump(200)
         report.note("pill visible while recording: \(lucid_pill_visible())")
         report.must(
-            lucid_test_pill_picture(pictures.appendingPathComponent("pill-recording.bmp").path, 0x7a8aa0),
+            lucid_test_pill_picture(pictures.appendingPathComponent("app-pill-recording.bmp").path, 0x7a8aa0),
             "draws the pill"
         )
         shell.showPill(.processing)
         lucid_pump(300)
-        _ = lucid_test_pill_picture(pictures.appendingPathComponent("pill-processing.bmp").path, 0x7a8aa0)
+        _ = lucid_test_pill_picture(pictures.appendingPathComponent("app-pill-processing.bmp").path, 0x7a8aa0)
         shell.flashPill("Copied. Press Ctrl+V", seconds: 0.2)
         lucid_pump(100)
-        _ = lucid_test_pill_picture(pictures.appendingPathComponent("pill-message.bmp").path, 0x7a8aa0)
+        _ = lucid_test_pill_picture(pictures.appendingPathComponent("app-pill-message.bmp").path, 0x7a8aa0)
         lucid_pump(400)
         lucid_test_level(-1)
         report.note("pill hidden again: \(!lucid_pill_visible())")
         report.must(
-            lucid_test_tray_picture(pictures.appendingPathComponent("tray.bmp").path, 0x1f1f1f),
+            lucid_test_tray_picture(pictures.appendingPathComponent("app-tray.bmp").path, 0x7a8aa0),
             "draws the tray icon"
         )
 

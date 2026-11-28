@@ -161,8 +161,9 @@ bool lucid_pill_make(void) {
     look.lfHeight = -px(13);
     look.lfWeight = FW_SEMIBOLD;
     look.lfCharSet = DEFAULT_CHARSET;
-    /* Smooth, but in greys: coloured fringes would show against the see-through edge. */
-    look.lfQuality = ANTIALIASED_QUALITY;
+    /* Segoe UI is drawn with hard edges at this size unless ClearType is asked for. Its
+       colours are turned to greys when the letters are laid on the pill. */
+    look.lfQuality = CLEARTYPE_QUALITY;
     lstrcpynW(look.lfFaceName, L"Segoe UI", LF_FACESIZE);
     font = CreateFontIndirectW(&look);
 

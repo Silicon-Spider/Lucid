@@ -195,8 +195,9 @@ void lucid_draw_text(LucidCanvas *canvas, HFONT font, const wchar_t *text, int x
             int target_x = x + column;
             if (target_x < 0 || target_x >= canvas->width) continue;
             uint32_t letter = letters.pixels[row * letters.width + column];
-            /* Green is the middle of the three, whatever way Windows smoothed the letter. */
-            float covered = (float)((letter >> 8) & 0xff) / 255.0f;
+            /* Windows may smooth a letter with a different amount of red, green and blue,
+               for the stripes of a flat screen. Their average is how much is covered. */
+            float covered = (float)((letter & 0xff) + ((letter >> 8) & 0xff) + ((letter >> 16) & 0xff)) / 765.0f;
             blend(&canvas->pixels[target_y * canvas->width + target_x], rgb, covered * alpha);
         }
     }

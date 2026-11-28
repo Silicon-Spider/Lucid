@@ -132,12 +132,14 @@ static void test_pill(void) {
 static void test_tray(void) {
     printf("Tray icon\n");
     printf("        shown beside the clock: %s\n", lucid_tray_shown() ? "yes" : "no");
+    /* The icon is white on a dark taskbar and dark on a light one. The pictures are on a
+       colour that shows either. */
     lucid_tray_update(LUCID_TRAY_IDLE, "Lucid: ready. Hold Right Ctrl and speak.");
-    check(lucid_test_tray_picture(in_folder("tray-idle.bmp"), 0x1f1f1f), "draws its icon");
+    check(lucid_test_tray_picture(in_folder("tray-idle.bmp"), 0x7a8aa0), "draws its icon");
     lucid_tray_update(LUCID_TRAY_RECORDING, "Lucid: recording");
-    check(lucid_test_tray_picture(in_folder("tray-recording.bmp"), 0x1f1f1f), "draws its icon while recording");
+    check(lucid_test_tray_picture(in_folder("tray-recording.bmp"), 0x7a8aa0), "draws its icon while recording");
     lucid_tray_update(LUCID_TRAY_ATTENTION, "Lucid needs a few things first");
-    check(lucid_test_tray_picture(in_folder("tray-attention.bmp"), 0x1f1f1f), "draws its icon when setup is needed");
+    check(lucid_test_tray_picture(in_folder("tray-attention.bmp"), 0x7a8aa0), "draws its icon when setup is needed");
     lucid_tray_update(LUCID_TRAY_IDLE, "Lucid");
 
     lucid_menu_clear();
