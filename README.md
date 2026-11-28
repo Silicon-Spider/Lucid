@@ -75,8 +75,10 @@ one more button: **Allow Lucid to Use the Keyboard…**. Press it and give your 
 [Linux](#linux) says what that allows, and why it is needed.
 
 The downloads are made by GitHub Actions from this repository, and each is tried there
-before it is published: unpacked or installed on a computer that has never had Swift or the
-engines, and started. None is signed, which is why Windows and macOS ask you to confirm.
+before it is published: installed or unpacked away from where it was built, and started
+with nothing to go by but what it brought. The Linux package is installed on Ubuntu 22.04
+and 24.04, and a sentence is dictated with it. None of the downloads is signed, which is why
+Windows and macOS ask you to confirm.
 
 ## Build it yourself
 
@@ -414,10 +416,11 @@ scripts/integration.sh    # the whole pipeline on synthesised speech
 
 A second workflow, [`.github/workflows/packages.yml`](.github/workflows/packages.yml), makes
 the [downloads](#get-lucid) with `scripts/package-linux.sh`, `scripts\package-windows.ps1`
-and `scripts/package-mac.sh`, and tries each one where neither Swift nor the engines have
-ever been. On Linux it installs the package on Ubuntu 22.04 and 24.04 and dictates with what
-was installed. On Windows it starts the unpacked app with only Windows' own folders to look
-in. On a Mac it checks that the app finds the engines inside itself and that they start. For
+and `scripts/package-mac.sh`, and tries each one away from where it was built. On Linux it
+installs the package on Ubuntu 22.04 and 24.04, checks that it leans on nothing of Swift's,
+and dictates with what was installed. On Windows it starts the unpacked app with only
+Windows' own folders to look in. On a Mac it checks that the app finds the engines inside
+itself and that they start. For
 a tag such as `v0.1.0` it attaches the downloads to the release of that name, so publishing
 a release on GitHub, with a new tag, is all it takes to put out a version.
 

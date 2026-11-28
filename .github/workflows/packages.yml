@@ -54,8 +54,8 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
-  # Installs the package the way opening it does, on a computer that has never had Swift or
-  # the engines, and dictates with what was installed.
+  # Installs the package the way opening it does, on a computer other than the one that made
+  # it, which has none of Lucid's engines, and dictates with what was installed.
   linux-try:
     name: Try the Linux download on ${{ matrix.os }}
     needs: linux
@@ -87,6 +87,11 @@ jobs:
           for program in /opt/lucid/Lucid /opt/lucid/lucid-cli /opt/lucid/engines/*/*-server; do
             if ldd "$program" | grep "not found"; then echo "$program cannot load those."; exit 1; fi
           done
+          # Nor does Lucid lean on Swift's libraries, which these machines have and most do not.
+          if ldd /opt/lucid/Lucid /opt/lucid/lucid-cli | grep -i swift; then
+            echo "Lucid needs Swift's libraries, which should be inside it."
+            exit 1
+          fi
           # With nothing of this computer's own to go by: only what the package brought.
           env -i HOME="$HOME" /opt/lucid/lucid-cli doctor > doctor.txt 2>&1 || true
           cat doctor.txt
