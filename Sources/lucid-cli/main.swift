@@ -46,6 +46,7 @@ let usage = """
 lucid-cli: command-line access to Lucid's dictation pipeline
 
   lucid-cli doctor                      check that the engines and models are installed
+  lucid-cli folder models|engines|logs  print where Lucid keeps its models, engines or logs
   lucid-cli models                      list the models in Lucid's models folder
   lucid-cli add-model [--style s1|general] <file>
                                         copy a speech (.bin) or cleanup (.gguf) model into it
@@ -162,8 +163,25 @@ func runDoctor(_ arguments: Arguments) throws -> Int32 {
     }
     print("\nNot installed:")
     for item in missing { print("  - \(item)") }
+    #if os(Windows)
+    print("\nRun scripts\\setup.ps1 in PowerShell to install what is missing.")
+    #elseif os(macOS)
     print("\nRun scripts/setup.sh to install what is missing.")
+    #else
+    print("\nPut whisper-server and llama-server on the PATH, or in folders of their own inside")
+    print("\(EngineConfig.enginesDirectory.path), and download the models with lucid-cli download.")
+    #endif
     return 1
+}
+
+func runFolder(_ arguments: Arguments) throws -> Int32 {
+    switch arguments.positional.first {
+    case "models": print(EngineConfig.modelsDirectory.path)
+    case "engines": print(EngineConfig.enginesDirectory.path)
+    case "logs": print(EngineConfig.logsDirectory.path)
+    default: throw CLIError("folder needs one of: models, engines, logs")
+    }
+    return 0
 }
 
 func runModels() -> Int32 {
@@ -242,7 +260,9 @@ func runAddModel(_ arguments: Arguments) throws -> Int32 {
         print("Try it with: lucid-cli eval --model \(model.fileName)")
     }
     if let warning = added.warning { print("Note: \(warning)") }
+    #if os(macOS)
     print("Choose it for the app under Models in Lucid's window.")
+    #endif
     return 0
 }
 
@@ -279,7 +299,9 @@ func runDownload(_ arguments: Arguments) async throws -> Int32 {
     let model = added.model
     print("Added \(model.fileName) as a \(model.kind == .speech ? "speech" : "cleanup") model.")
     if let warning = added.warning { print("Note: \(warning)") }
+    #if os(macOS)
     print("Choose it for the app under Models in Lucid's window.")
+    #endif
     return 0
 }
 
@@ -451,6 +473,7 @@ func run() async throws -> Int32 {
     }
     switch command {
     case "doctor": return try runDoctor(arguments)
+    case "folder": return try runFolder(arguments)
     case "models": return runModels()
     case "add-model": return try runAddModel(arguments)
     case "download": return try await runDownload(arguments)
