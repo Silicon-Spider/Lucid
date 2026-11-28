@@ -40,7 +40,8 @@ if (-not $engines -or -not $models) { throw 'lucid-cli did not say where its fol
 function Find-Download([string]$Repository, [string[]]$Wanted, [string[]]$Unwanted) {
     $headers = @{ 'User-Agent' = 'lucid-setup' }
     if ($env:GITHUB_TOKEN) { $headers['Authorization'] = "Bearer $env:GITHUB_TOKEN" }
-    $releases = @(Invoke-RestMethod "https://api.github.com/repos/$Repository/releases?per_page=30" -Headers $headers)
+    # Not wrapped in @(): that would make the whole list one item, and the loop would run once.
+    $releases = Invoke-RestMethod "https://api.github.com/repos/$Repository/releases?per_page=30" -Headers $headers
     foreach ($release in $releases) {
         if ($release.draft -or $release.prerelease) { continue }
         $fits = @($release.assets | Where-Object { $_.name -like '*.zip' } | Where-Object {
@@ -54,7 +55,7 @@ function Find-Download([string]$Repository, [string[]]$Wanted, [string[]]$Unwant
             return $fits[0]
         }
     }
-    Write-Host "None of the last $($releases.Count) releases of $Repository has a download that suits this PC. They offer:"
+    Write-Host "None of the latest releases of $Repository has a download that suits this PC. They offer:"
     foreach ($release in ($releases | Select-Object -First 8)) {
         $names = @($release.assets | ForEach-Object { $_.name }) -join ', '
         Write-Host "  $($release.tag_name): $names"
