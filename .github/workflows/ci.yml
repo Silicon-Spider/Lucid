@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Swift version
+        run: swift --version
+
+      # Builds the app, lucid-cli and the test runner.
+      - name: Build
+        run: swift build
+
+      # The unit tests. scripts/setup.sh and scripts/integration.sh are left out on
+      # purpose: they download about 1 GB of models.
+      - name: Unit tests
+        run: scripts/test.sh
+
+      # Draws the app's windows to PNG files without showing them.
+      - name: Draw the windows
+        timeout-minutes: 5
+        run: .build/debug/Lucid --render-ui "$RUNNER_TEMP/ui"
+
+      - name: Upload the drawings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui
+          path: ${{ runner.temp }}/ui
+          if-no-files-found: ignore

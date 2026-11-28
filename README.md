@@ -197,6 +197,12 @@ scripts/test.sh           # unit tests
 scripts/integration.sh    # the whole pipeline on synthesised speech
 ```
 
+**CI.** On every pull request, and on every push to `main`, GitHub Actions builds Lucid on a
+Mac, runs the unit tests, and draws the app's windows with `Lucid --render-ui`
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The drawings are PNG files in the
+`ui` download under Artifacts, on the run's page. CI does not run `scripts/integration.sh`,
+because it needs the models.
+
 Then by hand, with Lucid running:
 
 1. Open Notes. Hold the key and say "Um, so let's meet at two, actually three". Let go.
