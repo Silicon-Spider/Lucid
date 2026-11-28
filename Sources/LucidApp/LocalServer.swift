@@ -142,8 +142,11 @@ public final class LocalServer: @unchecked Sendable {
     private func serve(_ client: SocketHandle) {
         defer { Sockets.close(client) }
         Sockets.configure(client, timeoutSeconds: 10)
-        guard let request = Self.read(from: client) else {
-            Sockets.send(client, Self.serialize(.text("Bad request", status: 400)))
+        let request: HTTPRequest
+        switch Self.read(from: client) {
+        case .success(let read): request = read
+        case .failure(let refusal):
+            Sockets.send(client, Self.serialize(.text("Bad request: \(refusal.reason)", status: 400)))
             return
         }
         // The handler is async. This thread is not one of Swift's own, so it may wait.
@@ -177,26 +180,42 @@ public final class LocalServer: @unchecked Sendable {
 
     // MARK: Reading and writing HTTP
 
-    private static func read(from client: SocketHandle) -> HTTPRequest? {
+    /// Why a request was not answered, for whoever is working out what went wrong.
+    struct Refusal: Error {
+        var reason: String
+    }
+
+    private static func read(from client: SocketHandle) -> Result<HTTPRequest, Refusal> {
         var buffer = Data()
         var headerEnd: Int?
         let separator = Data("\r\n\r\n".utf8)
         while headerEnd == nil {
-            guard buffer.count <= maxHeaderBytes, let chunk = Sockets.receive(client), !chunk.isEmpty else { return nil }
+            guard buffer.count <= maxHeaderBytes else { return .failure(Refusal(reason: "its headers are too long")) }
+            guard let chunk = Sockets.receive(client), !chunk.isEmpty else {
+                return .failure(Refusal(reason: "it ended before its headers did"))
+            }
             buffer.append(chunk)
             headerEnd = buffer.range(of: separator)?.lowerBound
         }
-        guard let headerEnd, var request = parseHead(buffer.prefix(headerEnd)) else { return nil }
+        guard let headerEnd, var request = parseHead(buffer.prefix(headerEnd)) else {
+            return .failure(Refusal(reason: "it is not an HTTP request"))
+        }
 
         let length = Int(request.headers["content-length"] ?? "0") ?? 0
-        guard length >= 0, length <= maxBodyBytes else { return nil }
+        guard length >= 0, length <= maxBodyBytes else { return .failure(Refusal(reason: "its body is too large")) }
         var body = Data(buffer.suffix(from: buffer.startIndex + headerEnd + separator.count))
+        // Some clients hold a large body back until the server says it wants it.
+        if body.count < length, request.headers["expect"]?.lowercased() == "100-continue" {
+            Sockets.send(client, Data("HTTP/1.1 100 Continue\r\n\r\n".utf8))
+        }
         while body.count < length {
-            guard let chunk = Sockets.receive(client), !chunk.isEmpty else { return nil }
+            guard let chunk = Sockets.receive(client), !chunk.isEmpty else {
+                return .failure(Refusal(reason: "only \(body.count) of the \(length) bytes of its body arrived"))
+            }
             body.append(chunk)
         }
         request.body = Data(body.prefix(length))
-        return request
+        return .success(request)
     }
 
     /// Parses the request line and the headers.

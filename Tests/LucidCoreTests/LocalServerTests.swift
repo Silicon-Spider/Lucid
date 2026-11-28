@@ -38,6 +38,33 @@ func localServerTests() async {
             expectEqual(String(decoding: echoed, as: UTF8.self), "POST|/post|-|-|" + String(decoding: sent, as: UTF8.self))
         }
 
+        await asyncTest("tells a client that asks first to go ahead and send its body") {
+            let server = try LocalServer { request in .text("got \(request.body.count) bytes") }
+            server.start()
+            defer { server.stop() }
+            // curl, which is what fetches pages on Windows and Linux, can be made to ask.
+            let curl = ["/usr/bin/curl", "/bin/curl", "C:\\Windows\\System32\\curl.exe"].first { FileManager.default.fileExists(atPath: $0) }
+            guard let curl else { return }
+            let body = FileManager.default.temporaryDirectory.appendingPathComponent("lucid-body-\(UUID().uuidString)")
+            try Data(count: 300_000).write(to: body)
+            defer { try? FileManager.default.removeItem(at: body) }
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: curl)
+            process.arguments = [
+                "--silent", "--max-time", "20", "--noproxy", "*", "--header", "Expect: 100-continue",
+                "--expect100-timeout", "15", "--data-binary", "@\(body.path)", server.address + "/upload",
+            ]
+            let output = Pipe()
+            process.standardOutput = output
+            let began = Date()
+            try process.run()
+            let answer = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            process.waitUntilExit()
+            expectEqual(answer, "got 300000 bytes")
+            // Left unanswered, curl would have waited the 15 seconds it was told to.
+            expectTrue(Date().timeIntervalSince(began) < 8, "took \(Date().timeIntervalSince(began)) s")
+        }
+
         await asyncTest("answers several requests at once") {
             let server = try LocalServer { request in
                 try? await Task.sleep(nanoseconds: 100_000_000)

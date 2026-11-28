@@ -1,10 +1,11 @@
 # Lucid
 
-Hold a key, speak, let go. Clean text appears where your cursor is, in any Mac app.
+Hold a key, speak, let go. Clean text appears where your cursor is, in any app, on a Mac
+or a Windows PC.
 
 Lucid removes the "um"s, the false starts and the "no wait, I meant…" before the text
-lands, so what you get reads as if you had typed it. Everything runs on your Mac. No
-audio and no text is sent anywhere.
+lands, so what you get reads as if you had typed it. Everything runs on your own computer.
+No audio and no text is sent anywhere.
 
 | You say | Lucid writes |
 |---|---|
@@ -20,10 +21,15 @@ results in [`docs/benchmarks.md`](docs/benchmarks.md). The parts that need a per
 the keyboard (the dictation key, the microphone, pasting) were built carefully but have
 only been checked by hand-run steps, listed under [Check it works](#check-it-works).
 
+The Windows app is newer than the Mac app. Its parts are tested by programs on Windows: the
+dictation key, typing into another program's window, the clipboard, the pill and the tray
+icon. Nobody has yet used it for a day's work on a real PC with a real microphone, so
+expect rough edges, and see [what differs on Windows](#windows).
+
 ## Requirements
 
-The Lucid app is for the Mac. On Windows and Linux its command-line tool works: see
-[Windows and Linux](#windows-and-linux).
+These are for the Mac. For a PC, see [Windows](#windows). On Linux the command-line tool
+works: see [Linux](#linux).
 
 - A Mac with Apple Silicon, running macOS 14 or later.
 - [Homebrew](https://brew.sh).
@@ -199,31 +205,60 @@ swift run lucid-cli eval --model my-model.gguf     # try a cleanup model on the 
 
 Audio files must be 16 kHz mono 16-bit WAV.
 
-## Windows and Linux
+## Windows
 
-The Lucid app, with its dictation key, pill and window, is built on Apple's frameworks and
-runs only on a Mac. Everything underneath it runs on Windows and Linux too, through
-`lucid-cli`: speech to text, cleanup with its guardrails, your dictionary, and downloading,
-renaming and deleting models. You give it a recording and it gives you clean text. It cannot
-yet listen to a microphone or type into other apps there.
+Lucid for Windows sits beside the clock. Hold **Right Ctrl** and speak, then let go: the
+text is pasted into the app you are in. Tap the key twice to keep recording hands-free, and
+press Escape to cancel. The pill at the bottom of the screen shows the microphone level and
+the last words heard.
 
-On Windows, install [Swift](https://www.swift.org/install/windows) 6.2 or later, then in
-PowerShell:
+It needs Windows 10 or 11 on a 64-bit PC, about 1.1 GB of disk for the models, and
+[Swift](https://www.swift.org/install/windows) 6.2 or later to build it. In PowerShell:
 
 ```powershell
 git clone https://github.com/Silicon-Spider/Lucid.git
 cd Lucid
-scripts\setup.ps1          # builds lucid-cli, downloads the engines and the models (about 1 GB)
-scripts\integration.ps1    # the whole pipeline on synthesised speech
-swift run -c release lucid-cli dictate recording.wav
+scripts\setup.ps1    # the engines, the models (about 1 GB), the app, and a Start menu entry
 ```
 
-`scripts\setup.ps1` puts whisper.cpp and llama.cpp in folders of their own inside Lucid's
-engines folder. `lucid-cli folder engines` prints where that is.
+Then open Lucid from the Start menu. The first time, its window opens, and Home lists
+anything that is still missing. After that it stays out of the way: right-click its icon
+beside the clock for the cleanup level, the dictation key, recent dictations, and
+**Open Lucid…**. If the icon is not there, it is behind the **^** arrow.
 
-On Linux, put `whisper-server` and `llama-server` on the PATH, or in folders of their own
-inside the engines folder, and download the models with `lucid-cli download`.
-`lucid-cli doctor` says what is missing and where it is expected.
+The window has the same parts as on the Mac: Home, Models, Dictionary, History, Settings
+and About. Models can be downloaded from Hugging Face, added from a file, renamed and
+deleted there.
+
+What differs from the Mac:
+
+- The dictation key is Right Ctrl, Right Alt or Right Shift.
+- The window is a page that Lucid serves to this PC only, shown by Microsoft Edge in a
+  window of its own. Every request from the page needs a key that only that window was
+  given, and Edge keeps the window in a profile apart from your own browsing. To use another
+  browser built on Chromium, set `LUCID_BROWSER` to its path.
+- Windows does not tell Lucid what is before the cursor, so Lucid cannot add the space
+  between your last word and the dictation. Type it yourself.
+- Lucid recognises the password boxes of ordinary Windows programs and does not paste
+  there. It cannot recognise one drawn by a browser, so do not dictate with the cursor in a
+  web page's password box.
+- While a program that runs as administrator is in front, Windows keeps the keyboard from
+  Lucid: the key does nothing there, and Lucid cannot paste into it.
+
+`scripts\setup.ps1` puts whisper.cpp and llama.cpp in folders of their own inside Lucid's
+engines folder, which `lucid-cli folder engines` prints. `lucid-cli` works on Windows too,
+on recordings: `scripts\integration.ps1` runs the whole pipeline on synthesised speech.
+
+## Linux
+
+There is no app for Linux. Everything underneath the apps runs there through `lucid-cli`:
+speech to text, cleanup with its guardrails, your dictionary, and downloading, renaming
+and deleting models. You give it a recording and it gives you clean text.
+
+Put `whisper-server` and `llama-server` on the PATH, or in folders of their own inside the
+engines folder, and download the models with `lucid-cli download`. `lucid-cli doctor` says
+what is missing and where it is expected. `lucid-cli window` opens Lucid's window as a page
+in your browser, for the models, dictionary, history and settings.
 
 ## Check it works
 
@@ -238,9 +273,17 @@ scripts/integration.sh    # the whole pipeline on synthesised speech
 - builds Lucid on a Mac, runs the unit tests, and draws the app's windows with
   `Lucid --render-ui`. The drawings are PNG files in the `ui` download under Artifacts, on
   the run's page.
-- builds `lucid-cli` and runs the unit tests on Linux and on Windows.
+- builds `lucid-cli` and runs the unit tests on Linux.
+- builds the Windows app and runs the unit tests on Windows. Then it runs the tests of the
+  part that talks to Windows (`Tests/CLucidWinTests`): pressing the dictation key, typing
+  into another program's window, the clipboard, the tray menu and the pill. Last, it starts
+  the app with `--self-test`. Pictures of the pill and the tray icon as Windows drew them
+  are in the `windows` download under Artifacts.
 - on Windows, runs `scripts\setup.ps1` and `scripts\integration.ps1`: the real engines and
   models, turning synthesised speech into clean text.
+
+`scripts/test-windows-layer.sh` runs the same tests of the Windows part on Linux, under
+Wine, with a made-up microphone that plays a tone.
 
 The Mac's own end-to-end check, `scripts/integration.sh`, is not part of CI. Run it by hand.
 
@@ -260,6 +303,11 @@ Then by hand, with Lucid running:
    list and in the speech model picker. Then delete it with its trash button.
 9. Quit Lucid. `pgrep -f "whisper-server|llama-server"` prints nothing.
 
+On Windows the steps are the same, with these differences: use Notepad for step 1, skip
+step 2, the pill in step 6 says "Copied. Press Ctrl+V", Lucid is opened and quit from its
+icon beside the clock, and in step 9 Task Manager shows no `whisper-server` or
+`llama-server`.
+
 ## Troubleshooting
 
 | Problem | Try |
@@ -271,14 +319,20 @@ Then by hand, with Lucid running:
 | Text goes to the clipboard instead of being typed | The focused control is not a text field, or it is a password field. Press ⌘V where you want it. |
 | A download stops or fails | Press Download again. It continues where it stopped. For a gated model, download it in your browser and add the file. |
 | A model you added does not start | Models, in Lucid's window, says why. Choose Lucid's own model to go back. The engine logs say more. |
-| Something else | Engine logs are in `~/Library/Logs/Lucid/`. They never contain what you said. |
+| On Windows, the key does nothing | Look for Lucid's icon beside the clock, behind the **^** arrow if need be. If it is missing, open Lucid from the Start menu. If a program that runs as administrator is in front, Windows keeps the key from Lucid. |
+| On Windows, the window does not open | Lucid's window needs Microsoft Edge, or another browser built on Chromium: set `LUCID_BROWSER` to its path. |
+| On Windows, nothing is heard | Home, in Lucid's window, says whether Windows has a microphone and lets apps use it, with a button to the right page of Settings. |
+| Something else | Engine logs are in `~/Library/Logs/Lucid/` on a Mac and in `%LOCALAPPDATA%\Lucid\logs` on Windows. They never contain what you said. |
 
 ## Limits
 
 - English only.
-- The app is for the Mac. On Windows and Linux only `lucid-cli` works, on recordings.
-- Lucid uses the Mac's default microphone. Change it in System Settings, Sound.
-- Pasting uses ⌘V, so it assumes a keyboard layout where that works.
+- There are apps for the Mac and for Windows. On Linux only `lucid-cli` works, on recordings.
+- The Windows app has to be built from source, and has had far less use than the Mac app.
+  See [what differs on Windows](#windows).
+- Lucid uses the computer's default microphone. Change it in System Settings, Sound, or in
+  Windows' Sound settings.
+- Pasting uses ⌘V, or Ctrl+V on Windows, so it assumes a keyboard layout where that works.
 - Speech recognition was measured with synthesised speech, not a range of real voices and
   rooms. See [`docs/benchmarks.md`](docs/benchmarks.md) for what was and was not tested.
 

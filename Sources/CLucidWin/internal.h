@@ -26,6 +26,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
+#include <wchar.h>
 
 #include "include/lucidwin.h"
 
