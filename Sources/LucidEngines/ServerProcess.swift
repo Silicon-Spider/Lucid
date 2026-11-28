@@ -70,13 +70,21 @@ public final class ServerProcess: @unchecked Sendable {
 
     /// Stops the process, forcefully if it has not exited within two seconds.
     public func stop() {
-        guard isRunning else { return }
-        process.terminate()
-        let deadline = Date().addingTimeInterval(2)
-        while process.isRunning, Date() < deadline { Platform.pause() }
-        if process.isRunning {
-            Platform.forceStop(process)
-            process.waitUntilExit()
+        Self.stop([self])
+    }
+
+    /// Stops several processes at once. Each is asked to stop, and any that has not within
+    /// two seconds of being asked is stopped by force. Together, so that the wait is two
+    /// seconds at most however many there are: some engines do not stop when asked.
+    public static func stop(_ servers: [ServerProcess], patience: TimeInterval = 2) {
+        let running = servers.filter(\.isRunning)
+        guard !running.isEmpty else { return }
+        for server in running { server.process.terminate() }
+        let deadline = Date().addingTimeInterval(patience)
+        while Date() < deadline, running.contains(where: { $0.process.isRunning }) { Platform.pause() }
+        for server in running where server.process.isRunning {
+            Platform.forceStop(server.process)
+            server.process.waitUntilExit()
         }
     }
 

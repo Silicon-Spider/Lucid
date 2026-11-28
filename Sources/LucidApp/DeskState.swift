@@ -292,7 +292,8 @@ public final class DeskEngines: DictationEngine, @unchecked Sendable {
             await supervisor.stop()
             done.signal()
         }
-        _ = done.wait(timeout: .now() + 4)
+        // Longer than the engines are given to stop, so that none is left behind.
+        _ = done.wait(timeout: .now() + 6)
     }
 
     public func preview(wav: Data, prompt: String) async -> String? {

@@ -101,6 +101,29 @@ func engineTests() async {
             expectFalse(server.isRunning)
         }
 
+        await asyncTest("stops two servers that will not stop when asked, in the time allowed for one") {
+            // Each takes no notice of being asked to stop, as one of the real engines does.
+            // Windows has no asking: a process there is always stopped outright.
+            let stubborn = "import signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\nwhile True: time.sleep(1)"
+            let servers = try (0..<2).map { index -> ServerProcess in
+                let server = ServerProcess(
+                    name: "stubborn \(index)", executable: TestTools.python, arguments: ["-c", stubborn],
+                    port: try ServerProcess.freePort(), healthPath: "/", logURL: temporaryFile(".log")
+                )
+                try server.start()
+                return server
+            }
+            // Long enough for each to have told the system it will not stop.
+            try await Task.sleep(nanoseconds: 700_000_000)
+            expectTrue(servers.allSatisfy(\.isRunning), "the servers did not start")
+            let began = Date()
+            ServerProcess.stop(servers, patience: 1)
+            let took = Date().timeIntervalSince(began)
+            expectFalse(servers.contains(where: \.isRunning))
+            // One after the other, they would take a second each.
+            expectTrue(took < 1.8, "took \(took) s")
+        }
+
         await asyncTest("reports a server that exits straight away") {
             let log = temporaryFile(".log")
             defer { try? FileManager.default.removeItem(at: log) }

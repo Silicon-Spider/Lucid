@@ -69,8 +69,7 @@ public actor EngineSupervisor {
     }
 
     public func stop() {
-        speech?.stop()
-        cleanup?.stop()
+        ServerProcess.stop([speech, cleanup].compactMap { $0 })
         speech = nil
         cleanup = nil
         if tracksProcesses { PidFile.remove(at: pidFile) }
