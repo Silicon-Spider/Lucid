@@ -217,6 +217,12 @@ void lucid_typing_start(void) {
     }
 }
 
+void lucid_typing_retry(void) {
+    if (made_keyboard >= 0 || !(lucid_is_wayland() || g_getenv("LUCID_TEST_UINPUT"))) return;
+    make_keyboard();
+    can_type = made_keyboard >= 0;
+}
+
 void lucid_typing_stop(void) {
     if (lucid_display()) gtk_clipboard_store(clipboard());
     if (made_keyboard >= 0) {
@@ -335,6 +341,8 @@ bool lucid_paste(const char *text) {
     if (!lucid_display()) return false;
     bool not_text = false;
     uintptr_t front = lucid_front_window(NULL, 0, NULL, 0, NULL, &not_text);
+    /* The user may have allowed it since Lucid started. */
+    if (!can_type) lucid_typing_retry();
     if (!can_type || front == 0 || not_text) {
         lucid_copy(text);
         return false;

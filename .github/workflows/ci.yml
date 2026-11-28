@@ -60,7 +60,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libgtk-3-dev libayatana-appindicator3-dev libxi-dev libxtst-dev \
+            libgtk-3-dev libxi-dev libxtst-dev libayatana-appindicator3-1 \
             xvfb openbox dbus-x11 xcompmgr pulseaudio pulseaudio-utils xterm imagemagick
 
       - name: Swift version
@@ -109,7 +109,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libgtk-3-dev libayatana-appindicator3-dev libxi-dev libxtst-dev \
+            libgtk-3-dev libxi-dev libxtst-dev libayatana-appindicator3-1 \
             xvfb openbox dbus-x11 xcompmgr pulseaudio pulseaudio-utils imagemagick \
             espeak-ng xdotool curl cmake g++
 
@@ -169,7 +169,7 @@ jobs:
         timeout-minutes: 5
         run: |
           New-Item -ItemType Directory -Force windows-pictures | Out-Null
-          clang -std=c11 -O1 -D_CRT_SECURE_NO_WARNINGS -ISources/CLucidDesk/include (Get-ChildItem Sources/CLucidDesk/windows/*.c) Tests/CLucidDeskTests/windows.c -o harness.exe -luser32 -lgdi32 -lshell32 -lwinmm -lcomdlg32 -ladvapi32 -lversion
+          clang -std=c11 -O1 -D_CRT_SECURE_NO_WARNINGS -ISources/CLucidDesk/include (Get-ChildItem Sources/CLucidDesk/windows/*.c) Tests/CLucidDeskTests/windows.c -o harness.exe -luser32 -lgdi32 -lshell32 -lwinmm -lcomdlg32 -ladvapi32 -lversion -lole32 -luuid
           if ($LASTEXITCODE -ne 0) { throw 'The Windows layer did not build.' }
           .\harness.exe windows-pictures
           if ($LASTEXITCODE -ne 0) { throw 'The Windows layer failed its checks.' }

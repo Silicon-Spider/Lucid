@@ -258,7 +258,8 @@ final class DesktopShell: DeskShell {
     }
     #else
     /// How to let Lucid work in a Wayland session, which keeps apps from the keyboard.
-    static let waylandAdvice = "Run scripts/setup-linux.sh --allow-keys, then sign out and in again. Or sign in with an X11 (“Xorg”) session, where none of this is needed."
+    static let waylandAdvice = "Allowing it lets the programs you run read the keys you type and press keys, as any program can in an X11 session. You are asked for your password. Or sign in with an X11 (“Xorg”) session, where none of this is needed."
+    static let waylandAction = "Allow Lucid to Use the Keyboard…"
 
     private func linuxChecks() -> [SetupCheck] {
         let wayland = lucid_is_wayland()
@@ -271,7 +272,8 @@ final class DesktopShell: DeskShell {
                 : wayland
                     ? "This is a Wayland session, which does not show apps the keys you press elsewhere. Lucid can read the keyboard itself if you allow it. " + Self.waylandAdvice
                     : "The display did not let Lucid listen for the key. Quit Lucid from its icon in the panel, then open it again.",
-            done: watched
+            done: watched,
+            action: !watched && wayland ? Self.waylandAction : nil
         )
 
         let microphone: SetupCheck
@@ -298,7 +300,9 @@ final class DesktopShell: DeskShell {
                 detail: wayland
                     ? "A Wayland session does not let one app press keys in another, so Lucid leaves the text on the clipboard for you to paste. It can type for you if you allow it. " + Self.waylandAdvice
                     : "The display does not let Lucid press keys in other apps, so it leaves the text on the clipboard for you to paste.",
-                done: false
+                done: false,
+                // One permission covers both, so the button is only on the first of the two.
+                action: wayland && watched ? Self.waylandAction : nil
             ))
         }
         return checks
@@ -311,6 +315,10 @@ final class DesktopShell: DeskShell {
         case "sound": lucid_open("ms-settings:sound")
         case "microphone": lucid_open("ms-settings:privacy-microphone")
         default: break
+        }
+        #else
+        if id == "keyboard" || id == "typing", !lucid_allow_keys() {
+            lucid_alert("Lucid", "Lucid could not ask for permission: this desktop has no pkexec. Run scripts/setup-linux.sh --allow-keys instead, or sign in with an X11 session.")
         }
         #endif
     }

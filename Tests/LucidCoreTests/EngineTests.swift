@@ -71,6 +71,24 @@ func engineTests() async {
             expectEqual(EngineConfig.findInEngines(name, under: folder.appendingPathComponent("missing")), nil)
         }
 
+        test("prefers the engines that came with the app") {
+            let files = FileManager.default
+            let folder = files.temporaryDirectory.appendingPathComponent("lucid-bundled-\(UUID().uuidString)")
+            defer { try? files.removeItem(at: folder) }
+            // Any program will do as a stand-in: what matters is where it is and what it is called.
+            let program = TestTools.failing.executable
+            let name = "whisper-server" + (program.pathExtension.isEmpty ? "" : "." + program.pathExtension)
+            let home = folder.appendingPathComponent("engines/whisper-server")
+            try files.createDirectory(at: home, withIntermediateDirectories: true)
+            try files.copyItem(at: program, to: home.appendingPathComponent(name))
+            let found = EngineConfig.findBinary("whisper-server", bundled: [folder.appendingPathComponent("engines")])
+            expectEqual(found.pathComponents.suffix(3).joined(separator: "/"), "engines/whisper-server/" + name)
+            // Without any, the answer is wherever else it is, or where Lucid expects it.
+            let elsewhere = EngineConfig.findBinary("whisper-server", bundled: [folder.appendingPathComponent("none")])
+            expectFalse(elsewhere.path.hasPrefix(folder.path))
+            expectTrue(EngineConfig.bundledEnginesDirectories.first?.lastPathComponent == "engines", "\(EngineConfig.bundledEnginesDirectories)")
+        }
+
         test("reports what is missing") {
             var config = EngineConfig.standard()
             config.whisperServer = URL(fileURLWithPath: "/nonexistent/whisper-server")

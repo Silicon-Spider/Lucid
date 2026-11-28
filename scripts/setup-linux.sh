@@ -63,20 +63,19 @@ need tar "Install tar and run this again."
 if [ "$APP" = 1 ]; then
   MISSING=0
   for header in /usr/include/gtk-3.0/gtk/gtk.h \
-      /usr/include/libayatana-appindicator3-0.1/libayatana-appindicator/app-indicator.h \
       /usr/include/X11/extensions/XInput2.h /usr/include/X11/extensions/XTest.h; do
     [ -f "$header" ] || MISSING=1
   done
   if [ "$MISSING" = 1 ]; then
     echo "The app is built on GTK, and what is needed to build on it is not installed. Install it with:" >&2
     if command -v apt-get >/dev/null 2>&1; then
-      echo "  sudo apt-get install libgtk-3-dev libayatana-appindicator3-dev libxi-dev libxtst-dev" >&2
+      echo "  sudo apt-get install libgtk-3-dev libxi-dev libxtst-dev libayatana-appindicator3-1" >&2
     elif command -v dnf >/dev/null 2>&1; then
-      echo "  sudo dnf install gtk3-devel libayatana-appindicator-gtk3-devel libXi-devel libXtst-devel" >&2
+      echo "  sudo dnf install gtk3-devel libXi-devel libXtst-devel libayatana-appindicator-gtk3" >&2
     elif command -v pacman >/dev/null 2>&1; then
       echo "  sudo pacman -S gtk3 libayatana-appindicator libxi libxtst" >&2
     else
-      echo "  the development packages of GTK 3, ayatana-appindicator3, Xi and Xtst" >&2
+      echo "  the development packages of GTK 3, Xi and Xtst" >&2
     fi
     echo "Then run this again. Or run it with --no-app, for lucid-cli alone." >&2
     exit 1

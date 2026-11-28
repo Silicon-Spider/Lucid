@@ -2,10 +2,14 @@
 
 #ifdef __linux__
 
-#include <libayatana-appindicator/app-indicator.h>
+#include <dlfcn.h>
 #include <string.h>
 
 /* Lucid's icon in the panel, and the menu it opens.
+
+   The icon is shown by a library that most desktops have and some do not. It is looked for
+   when Lucid starts, not when Lucid is built, so that one build runs on both kinds: where
+   the library is missing there is no icon, and everything else works.
 
    A Linux desktop shows the menu itself, from a description Lucid gives it, and does not
    say when it is about to. So the menu is made again whenever the app says something has
@@ -21,6 +25,38 @@ typedef struct {
 
 static Item items[MOST_ITEMS];
 static int item_count;
+
+/* The few things Lucid asks of the library, by the names and numbers it has always had. */
+typedef struct _AppIndicator AppIndicator;
+#define INDICATOR_CATEGORY_APPLICATION_STATUS 0
+#define INDICATOR_STATUS_PASSIVE 0
+#define INDICATOR_STATUS_ACTIVE 1
+
+static AppIndicator *(*indicator_new)(const char *id, const char *icon, int category, const char *icon_folder);
+static void (*indicator_set_title)(AppIndicator *self, const char *title);
+static void (*indicator_set_status)(AppIndicator *self, int status);
+static void (*indicator_set_menu)(AppIndicator *self, GtkMenu *menu);
+static void (*indicator_set_icon)(AppIndicator *self, const char *icon, const char *description);
+
+/* Finds the library, under either of the names it goes by. False where it is not installed. */
+static bool load_library(void) {
+    static bool tried, found;
+    if (tried) return found;
+    tried = true;
+    static const char *names[] = {"libayatana-appindicator3.so.1", "libappindicator3.so.1"};
+    for (size_t index = 0; index < G_N_ELEMENTS(names) && !found; index++) {
+        void *library = dlopen(names[index], RTLD_NOW | RTLD_GLOBAL);
+        if (!library) continue;
+        indicator_new = (AppIndicator *(*)(const char *, const char *, int, const char *))dlsym(library, "app_indicator_new_with_path");
+        indicator_set_title = (void (*)(AppIndicator *, const char *))dlsym(library, "app_indicator_set_title");
+        indicator_set_status = (void (*)(AppIndicator *, int))dlsym(library, "app_indicator_set_status");
+        indicator_set_menu = (void (*)(AppIndicator *, GtkMenu *))dlsym(library, "app_indicator_set_menu");
+        indicator_set_icon = (void (*)(AppIndicator *, const char *, const char *))dlsym(library, "app_indicator_set_icon_full");
+        found = indicator_new && indicator_set_title && indicator_set_status && indicator_set_menu && indicator_set_icon;
+        if (!found) dlclose(library);
+    }
+    return found;
+}
 
 static AppIndicator *indicator;
 static GtkWidget *menu;
@@ -145,7 +181,7 @@ static void refresh(void) {
     given = now;
     int index = 0;
     menu = build(&index);
-    app_indicator_set_menu(indicator, GTK_MENU(menu));
+    indicator_set_menu(indicator, GTK_MENU(menu));
 }
 
 static gboolean refresh_later(gpointer unused) {
@@ -155,23 +191,22 @@ static gboolean refresh_later(gpointer unused) {
 }
 
 void lucid_tray_make(void) {
-    if (indicator) return;
+    if (indicator || !load_library()) return;
     const char *folder = lucid_cache_folder();
     for (int look = LUCID_TRAY_IDLE; look <= LUCID_TRAY_ATTENTION; look++) {
         char *path = g_strdup_printf("%s/%s.png", folder, icon_name(look));
         lucid_icon_save(look, path, 64);
         g_free(path);
     }
-    indicator = app_indicator_new_with_path(
-        "lucid", icon_name(state), APP_INDICATOR_CATEGORY_APPLICATION_STATUS, folder);
+    indicator = indicator_new("lucid", icon_name(state), INDICATOR_CATEGORY_APPLICATION_STATUS, folder);
     if (!indicator) return;
-    app_indicator_set_title(indicator, "Lucid");
-    app_indicator_set_status(indicator, APP_INDICATOR_STATUS_ACTIVE);
+    indicator_set_title(indicator, "Lucid");
+    indicator_set_status(indicator, INDICATOR_STATUS_ACTIVE);
     /* A panel shows nothing for an icon that has no menu. */
     refresh();
     if (!menu) {
         menu = gtk_menu_new();
-        app_indicator_set_menu(indicator, GTK_MENU(menu));
+        indicator_set_menu(indicator, GTK_MENU(menu));
     }
     refresh_timer = g_timeout_add_seconds(5, refresh_later, NULL);
 }
@@ -180,7 +215,7 @@ void lucid_tray_destroy(void) {
     if (refresh_timer) g_source_remove(refresh_timer);
     refresh_timer = 0;
     if (indicator) {
-        app_indicator_set_status(indicator, APP_INDICATOR_STATUS_PASSIVE);
+        indicator_set_status(indicator, INDICATOR_STATUS_PASSIVE);
         g_object_unref(indicator);
     }
     indicator = NULL;
@@ -201,10 +236,10 @@ void lucid_tray_update(int new_state, const char *tooltip) {
     if (!indicator) return;
     if (new_state != state) {
         state = new_state;
-        app_indicator_set_icon_full(indicator, icon_name(state), "Lucid");
+        indicator_set_icon(indicator, icon_name(state), "Lucid");
     }
     /* Panels that show anything on hover show the title. */
-    if (tooltip && tooltip[0]) app_indicator_set_title(indicator, tooltip);
+    if (tooltip && tooltip[0]) indicator_set_title(indicator, tooltip);
     refresh();
 }
 

@@ -112,6 +112,9 @@ final class DesktopApp {
         }
         defer { signals.forEach { $0.cancel() } }
         #endif
+        // So that Lucid can be opened like any other app from now on. Its first run may have
+        // been from wherever it was unpacked.
+        lucid_install_launcher(false)
         desk.start()
         if !desk.settings.current.welcomed {
             // The window opens by itself only the first time, to show how Lucid works.

@@ -187,10 +187,21 @@ void lucid_close_window(const char *title);
 /* Shows the file chooser. `patterns` is like "*.bin;*.gguf". Returns the path's length, or
    0 if the user chose nothing. */
 size_t lucid_choose_file(const char *title, const char *kinds, const char *patterns, char *out, size_t capacity);
-/* Adds Lucid to the desktop's menu of applications, with its icon, so that it can be opened
-   like any other app. On Linux this writes the entry for whoever is signed in, and needs
-   no display. On Windows scripts\setup.ps1 adds the Start menu entry, and this does nothing. */
-bool lucid_install_launcher(void);
+/* Adds Lucid to the Start menu, or to a Linux desktop's menu of applications, with its
+   icon, so that it can be opened like any other app. The entry is for whoever is signed in
+   and points at this copy of Lucid. It needs no window or display.
+
+   An entry that points at another copy of Lucid is left alone, unless that copy is gone or
+   `replace` is set. So Lucid can call this each time it starts: the entry appears the first
+   time, and is put right if Lucid's folder is moved. Where a package has installed an entry
+   for everyone, nothing is added. */
+bool lucid_install_launcher(bool replace);
+/* For a Wayland session on Linux: asks the user, with the desktop's own password prompt, to
+   let the programs they run read the keyboards and make one, which is how Lucid sees its
+   dictation key and pastes there. False if there is nothing to ask with. The answer shows
+   in lucid_keyboard_watched and lucid_can_type a few seconds after the user gives it.
+   Elsewhere there is nothing to allow, and this does nothing. */
+bool lucid_allow_keys(void);
 bool lucid_opens_at_login(void);
 bool lucid_set_opens_at_login(bool on);
 void lucid_alert(const char *title, const char *text);

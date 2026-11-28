@@ -11,6 +11,7 @@
 #endif
 #define _WIN32_WINNT 0x0A00
 #include <windows.h>
+#include <shlobj.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -479,6 +480,30 @@ static void test_system(const char *self) {
     check(lucid_set_opens_at_login(false), "can be switched off");
     check(!lucid_opens_at_login(), "is then off");
     if (had) RegSetKeyValueW(HKEY_CURRENT_USER, run_key, L"Lucid", REG_SZ, before, before_bytes);
+
+    printf("The Start menu\n");
+    /* A real Lucid on this PC may have an entry there. It is put back afterwards. */
+    wchar_t programs[MAX_PATH], link[MAX_PATH + 32], saved[MAX_PATH + 32];
+    SHGetFolderPathW(NULL, CSIDL_PROGRAMS, NULL, SHGFP_TYPE_CURRENT, programs);
+    wsprintfW(link, L"%s\\Lucid.lnk", programs);
+    wsprintfW(saved, L"%s\\Lucid.lnk.before-test", programs);
+    bool had_link = MoveFileExW(link, saved, MOVEFILE_REPLACE_EXISTING) != 0;
+    check(lucid_install_launcher(false), "Lucid adds itself");
+    check(GetFileAttributesW(link) != INVALID_FILE_ATTRIBUTES, "with an entry in the Start menu");
+    wchar_t data[MAX_PATH], icon[MAX_PATH + 32];
+    SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, data);
+    wsprintfW(icon, L"%s\\Lucid\\Lucid.ico", data);
+    WIN32_FILE_ATTRIBUTE_DATA about;
+    bool has_icon = GetFileAttributesExW(icon, GetFileExInfoStandard, &about) != 0;
+    check(has_icon && about.nFileSizeLow > 200000, "and an icon for it");
+    {
+        char copy[MAX_PATH * 3], from[MAX_PATH * 3];
+        WideCharToMultiByte(CP_UTF8, 0, icon, -1, from, sizeof from, NULL, NULL);
+        snprintf(copy, sizeof copy, "%s", in_folder("start-menu-icon.ico"));
+        CopyFileA(from, copy, FALSE);
+    }
+    DeleteFileW(link);
+    if (had_link) MoveFileExW(saved, link, MOVEFILE_REPLACE_EXISTING);
 
     printf("Microphone\n");
     printf("        microphones: %d, allowed by Windows: %s\n", lucid_mic_devices(), lucid_mic_allowed() ? "yes" : "no");

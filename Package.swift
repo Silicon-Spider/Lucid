@@ -30,7 +30,9 @@ var desktopLayer: Target?
 #if os(Windows)
 desktopLayer = .target(
     name: "CLucidDesk",
-    linkerSettings: ["user32", "gdi32", "shell32", "winmm", "comdlg32", "advapi32", "version"].map { .linkedLibrary($0) }
+    linkerSettings: ["user32", "gdi32", "shell32", "winmm", "comdlg32", "advapi32", "version", "ole32", "uuid"].map {
+        .linkedLibrary($0)
+    }
 )
 #elseif os(Linux)
 // The Linux half is built on GTK, which a computer without a desktop does not have. There,
@@ -38,7 +40,6 @@ desktopLayer = .target(
 // LUCID_LINUX_APP=0 leaves the app out, and LUCID_LINUX_APP=1 insists on it.
 let gtkHeaders = [
     "/usr/include/gtk-3.0/gtk/gtk.h",
-    "/usr/include/libayatana-appindicator3-0.1/libayatana-appindicator/app-indicator.h",
     "/usr/include/X11/extensions/XInput2.h",
     "/usr/include/X11/extensions/XTest.h",
 ]
@@ -46,16 +47,16 @@ let wanted = Context.environment["LUCID_LINUX_APP"]
 if wanted == "1" || (wanted != "0" && gtkHeaders.allSatisfy { FileManager.default.fileExists(atPath: $0) }) {
     targets.append(.systemLibrary(
         name: "CLucidGtk",
-        pkgConfig: "ayatana-appindicator3-0.1",
+        pkgConfig: "gtk+-3.0",
         providers: [
-            .apt(["libgtk-3-dev", "libayatana-appindicator3-dev", "libxi-dev", "libxtst-dev"]),
-            .yum(["gtk3-devel", "libayatana-appindicator-gtk3-devel", "libXi-devel", "libXtst-devel"]),
+            .apt(["libgtk-3-dev", "libxi-dev", "libxtst-dev"]),
+            .yum(["gtk3-devel", "libXi-devel", "libXtst-devel"]),
         ]
     ))
     desktopLayer = .target(
         name: "CLucidDesk",
         dependencies: ["CLucidGtk"],
-        linkerSettings: ["X11", "Xi", "Xtst", "m"].map { .linkedLibrary($0) }
+        linkerSettings: ["X11", "Xi", "Xtst", "m", "dl"].map { .linkedLibrary($0) }
     )
 }
 #endif

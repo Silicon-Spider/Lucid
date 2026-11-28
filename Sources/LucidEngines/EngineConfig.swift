@@ -54,12 +54,20 @@ public struct EngineConfig: Equatable, Sendable {
         for case let url as URL in walker {
             if walker.level > 3 {
                 walker.skipDescendants()
-            } else if url.lastPathComponent == file, FileManager.default.isExecutableFile(atPath: url.path) {
+            } else if url.lastPathComponent == file, isProgram(url) {
                 found.append(url)
             }
         }
         // The same answer every time, whatever order the system lists folders in.
         return found.min { $0.path < $1.path }
+    }
+
+    /// True for a file that can be run. A folder counts as "executable" to the system, and
+    /// an engine's folder often has the engine's own name.
+    private static func isProgram(_ url: URL) -> Bool {
+        var isFolder: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder), !isFolder.boolValue else { return false }
+        return FileManager.default.isExecutableFile(atPath: url.path)
     }
 
     /// Where engine logs are written: `~/Library/Logs/Lucid` on a Mac, and a `logs` folder
@@ -73,11 +81,28 @@ public struct EngineConfig: Equatable, Sendable {
         #endif
     }
 
-    /// Finds an engine's program. On a Mac that is Homebrew's folder, on Apple Silicon then on
-    /// Intel. Everywhere, Lucid's own `engines` folder and the PATH are also searched. When the
-    /// engine is nowhere, the answer is where Lucid expects it, for the message that says so.
-    static func findBinary(_ name: String) -> URL {
+    /// Where engines that came with the app are: an `engines` folder beside its program, and
+    /// in a Mac app, `Contents/Resources/engines`. A copy of Lucid that was downloaded has
+    /// its engines there, so that nothing else needs installing.
+    public static var bundledEnginesDirectories: [URL] {
+        guard let program = Bundle.main.executableURL?.resolvingSymlinksInPath() else { return [] }
+        let folder = program.deletingLastPathComponent()
+        var folders = [folder.appendingPathComponent("engines")]
+        #if os(macOS)
+        folders.append(folder.deletingLastPathComponent().appendingPathComponent("Resources/engines"))
+        #endif
+        return folders
+    }
+
+    /// Finds an engine's program. The engines that came with the app come first. Then, on a
+    /// Mac, Homebrew's folder, on Apple Silicon then on Intel. Then Lucid's own `engines`
+    /// folder, and the PATH. When the engine is nowhere, the answer is where Lucid expects
+    /// it, for the message that says so.
+    public static func findBinary(_ name: String, bundled: [URL] = bundledEnginesDirectories) -> URL {
         let file = Platform.programFile(name)
+        for folder in bundled {
+            if let found = findInEngines(file, under: folder) { return found }
+        }
         var candidates: [URL] = []
         #if os(macOS)
         candidates += ["/opt/homebrew/bin", "/usr/local/bin"].map { URL(fileURLWithPath: $0).appendingPathComponent(file) }

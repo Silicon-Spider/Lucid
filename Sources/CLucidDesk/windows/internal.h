@@ -17,11 +17,17 @@
 #define _WIN32_WINNT 0x0A00
 #endif
 
+#ifndef COBJMACROS
+#define COBJMACROS
+#endif
+
 #include <windows.h>
 #include <mmsystem.h>
 #include <shellapi.h>
 #include <commdlg.h>
 #include <winver.h>
+#include <objbase.h>
+#include <shlobj.h>
 
 #include <stdbool.h>
 #include <stddef.h>

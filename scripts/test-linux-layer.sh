@@ -8,7 +8,7 @@
 # plays a steady tone, and checks that the tone arrives unbroken.
 #
 # Needs what the app is built on, and what scripts/with-test-desktop.sh needs. On Ubuntu:
-#   sudo apt-get install libgtk-3-dev libayatana-appindicator3-dev libxi-dev libxtst-dev \
+#   sudo apt-get install libgtk-3-dev libxi-dev libxtst-dev libayatana-appindicator3-1 \
 #     xvfb openbox dbus-x11 xcompmgr pulseaudio pulseaudio-utils xterm
 #
 #   scripts/test-linux-layer.sh           run the checks
@@ -17,7 +17,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 command -v pkg-config >/dev/null 2>&1 || { echo "This needs pkg-config." >&2; exit 2; }
-pkg-config --exists ayatana-appindicator3-0.1 xi xtst \
+pkg-config --exists gtk+-3.0 xi xtst \
   || { echo "This needs what the app is built on: see the top of this script." >&2; exit 2; }
 
 WORK=$(mktemp -d)
@@ -26,9 +26,9 @@ trap 'case "$WORK" in /tmp/*|/var/*) rm -rf -- "$WORK" ;; esac' EXIT
 echo "build    the Linux layer and its tests"
 # shellcheck disable=SC2046
 ${CC:-cc} -std=gnu11 -O1 -Wall -Wextra -Wshadow -Werror \
-  $(pkg-config --cflags ayatana-appindicator3-0.1 xi xtst) -ISources/CLucidDesk/include \
+  $(pkg-config --cflags gtk+-3.0 xi xtst) -ISources/CLucidDesk/include \
   Sources/CLucidDesk/linux/*.c Tests/CLucidDeskTests/linux.c -o "$WORK/linux-layer-tests" \
-  $(pkg-config --libs ayatana-appindicator3-0.1 xi xtst) -lX11 -lm -lpthread
+  $(pkg-config --libs gtk+-3.0 xi xtst) -lX11 -lm -lpthread -ldl
 
 OUT="$WORK/out"
 if [ "${1:-}" = "pictures" ]; then
