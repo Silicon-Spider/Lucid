@@ -244,6 +244,11 @@ What differs from the Mac:
   web page's password box.
 - While a program that runs as administrator is in front, Windows keeps the keyboard from
   Lucid: the key does nothing there, and Lucid cannot paste into it.
+- Speech recognition runs on the processor alone, not the graphics card, so Lucid's usual
+  speech model is slow on a PC: about 14 seconds for a short sentence on the four-core
+  machine that tests it. A smaller model is much faster and still good for clear
+  speech. Download **Whisper base.en** or **Whisper small.en** under Models and choose it
+  there, or set up with `scripts\setup.ps1 -SpeechModel ggml-base.en.bin`.
 
 `scripts\setup.ps1` puts whisper.cpp and llama.cpp in folders of their own inside Lucid's
 engines folder, which `lucid-cli folder engines` prints. `lucid-cli` works on Windows too,
