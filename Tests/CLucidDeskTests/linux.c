@@ -435,6 +435,17 @@ static void test_clipboard_and_typing(void) {
 
 /* ---- The desktop itself ---- */
 
+/* Runs this program again to add Lucid to the menu, with `shared` as the only folder of
+   things installed for everyone. */
+static bool add_to_menu(bool replace, const char *shared) {
+    char **environment = g_environ_setenv(g_get_environ(), "XDG_DATA_DIRS", shared, TRUE);
+    char *arguments[] = {self, "launcher", replace ? "replace" : "keep", NULL};
+    int status = -1;
+    bool ran = g_spawn_sync(NULL, arguments, environment, G_SPAWN_DEFAULT, NULL, NULL, NULL, NULL, &status, NULL);
+    g_strfreev(environment);
+    return ran && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
 static void test_system(void) {
     printf("Opening at sign-in\n");
     check(!lucid_opens_at_login(), "is off to begin with");
@@ -447,6 +458,70 @@ static void test_system(void) {
     g_free(entry);
     check(lucid_set_opens_at_login(false), "can be switched off");
     check(!lucid_opens_at_login(), "is then off");
+
+    printf("The applications menu\n");
+    /* Whether Lucid adds itself depends on what is installed for everyone, so each try is a
+       copy of this program that is shown a folder of our own in place of the system's. */
+    char *nothing_shared = g_strdup(in_folder("shared-empty"));
+    char *package_shared = g_strdup(in_folder("shared-package"));
+    char *package_folder = g_build_filename(package_shared, "applications", NULL);
+    char *package_entry = g_build_filename(package_folder, "lucid.desktop", NULL);
+    g_mkdir_with_parents(nothing_shared, 0755);
+    g_mkdir_with_parents(package_folder, 0755);
+    g_file_set_contents(package_entry, "[Desktop Entry]\nType=Application\nName=Lucid\nExec=/opt/lucid/Lucid\n", -1, NULL);
+    char *launcher = g_build_filename(g_get_user_data_dir(), "applications", "lucid.desktop", NULL);
+    unlink(launcher);
+    check(add_to_menu(false, package_shared), "Lucid installed for everyone is in the menu already");
+    check(!g_file_test(launcher, G_FILE_TEST_EXISTS), "so it adds nothing for this user");
+    check(add_to_menu(false, nothing_shared), "any other Lucid adds itself");
+    listed = contents(launcher);
+    check(strstr(listed, "Name=Lucid") && strstr(listed, "Terminal=false") && strstr(listed, "Icon=lucid") && strstr(listed, self), "with an entry that starts this copy");
+    g_free(listed);
+    char *icon = g_build_filename(g_get_user_data_dir(), "icons", "hicolor", "256x256", "apps", "lucid.png", NULL);
+    check(g_file_test(icon, G_FILE_TEST_EXISTS), "and its icon");
+    g_free(icon);
+    /* Another copy of Lucid, still there, keeps its entry. One that is gone does not. */
+    g_file_set_contents(launcher, "[Desktop Entry]\nType=Application\nName=Lucid\nExec=/bin/sh\n", -1, NULL);
+    add_to_menu(false, nothing_shared);
+    listed = contents(launcher);
+    check(strstr(listed, "Exec=/bin/sh") != NULL, "leaves the entry of another copy alone");
+    g_free(listed);
+    g_file_set_contents(launcher, "[Desktop Entry]\nType=Application\nName=Lucid\nExec=\"/no/such folder/Lucid\"\n", -1, NULL);
+    add_to_menu(false, nothing_shared);
+    listed = contents(launcher);
+    check(strstr(listed, self) != NULL, "takes over the entry of a copy that is gone");
+    g_free(listed);
+    g_file_set_contents(launcher, "[Desktop Entry]\nType=Application\nName=Lucid\nExec=/bin/sh\n", -1, NULL);
+    add_to_menu(true, nothing_shared);
+    listed = contents(launcher);
+    check(strstr(listed, self) != NULL, "and any entry when told to");
+    g_free(listed);
+    unlink(launcher);
+    g_free(launcher);
+    g_free(package_entry);
+    g_free(package_folder);
+    g_free(package_shared);
+    g_free(nothing_shared);
+
+    printf("Allowing the keyboard in a Wayland session\n");
+    /* A stand-in for the desktop's password prompt: this program again, which writes down
+       what it was asked to run. */
+    g_setenv("LUCID_TEST_PKEXEC", self, TRUE);
+    g_setenv("LUCID_HARNESS_NOTE", in_folder("allowed.txt"), TRUE);
+    unlink(in_folder("allowed.txt"));
+    check(lucid_allow_keys(), "asks with the desktop's password prompt");
+    char *asked = NULL;
+    for (int attempt = 0; attempt < 50; attempt++) {
+        lucid_pump(100);
+        g_free(asked);
+        asked = contents(in_folder("allowed.txt"));
+        if (asked[0]) break;
+    }
+    check(strstr(asked, "[/bin/sh] [-c]") != NULL, "to run one command as someone who may change the system");
+    check(strstr(asked, "/etc/udev/rules.d/70-lucid.rules") && strstr(asked, "KERNEL==\"uinput\"") && strstr(asked, "ID_INPUT_KEYBOARD") && strstr(asked, "udevadm trigger"),
+          "which lets whoever is signed in read the keyboards and make one");
+    g_free(asked);
+    g_unsetenv("LUCID_TEST_PKEXEC");
 
     printf("Microphone\n");
     char recorder[64];
@@ -595,9 +670,9 @@ int main(int argc, char **argv) {
     ssize_t length = readlink("/proc/self/exe", self, sizeof self - 1);
     self[length > 0 ? length : 0] = 0;
 
-    /* Started as the stand-in browser: write down how, and leave. */
+    /* Started as the stand-in browser, or the stand-in password prompt: write down how, and leave. */
     const char *note = g_getenv("LUCID_HARNESS_NOTE");
-    if (note && argc > 1 && strncmp(argv[1], "--app=", 6) == 0) {
+    if (note && argc > 1 && (strncmp(argv[1], "--app=", 6) == 0 || strcmp(argv[1], "/bin/sh") == 0)) {
         FILE *file = fopen(note, "wb");
         if (file) {
             for (int index = 1; index < argc; index++) fprintf(file, "[%s] ", argv[index]);
@@ -608,6 +683,7 @@ int main(int argc, char **argv) {
     }
     if (argc > 1 && strcmp(argv[1], "second") == 0) return lucid_claim_single_instance() ? 0 : 7;
     if (argc > 1 && strcmp(argv[1], "editor") == 0) return run_editor();
+    if (argc > 2 && strcmp(argv[1], "launcher") == 0) return lucid_install_launcher(strcmp(argv[2], "replace") == 0) ? 0 : 7;
 
     snprintf(folder, sizeof folder, "%s", argc > 1 ? argv[1] : ".");
     g_setenv("LUCID_HARNESS_SCREEN", in_folder("screen.png"), TRUE);

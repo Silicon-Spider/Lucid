@@ -57,7 +57,7 @@ public final class ServerProcess: @unchecked Sendable {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             guard isRunning else {
-                throw EngineError.launchFailed("\(name) stopped during start-up. See \(logURL.path)")
+                throw EngineError.launchFailed("\(name) stopped during start-up\(ending). See \(logURL.path)")
             }
             if let (_, response) = try? await LocalHTTP.session.data(for: request),
                (response as? HTTPURLResponse)?.statusCode == 200 {
@@ -66,6 +66,24 @@ public final class ServerProcess: @unchecked Sendable {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
         throw EngineError.notReady("\(name) did not answer within \(Int(timeout)) seconds. See \(logURL.path)")
+    }
+
+    /// How a process that has stopped came to stop, where that says more than its log can.
+    /// A program built for a newer processor than this computer's is stopped by the system
+    /// before it can write anything down.
+    private var ending: String {
+        guard launched, !process.isRunning else { return "" }
+        #if os(Windows)
+        // What Windows gives a program that used an instruction the processor does not have.
+        let wrongProcessor = UInt32(bitPattern: process.terminationStatus) == 0xC000_001D
+        #else
+        let wrongProcessor = process.terminationReason == .uncaughtSignal && process.terminationStatus == SIGILL
+        #endif
+        if wrongProcessor { return ": it was built for a different processor than this computer's" }
+        #if !os(Windows)
+        if process.terminationReason == .uncaughtSignal { return " (signal \(process.terminationStatus))" }
+        #endif
+        return ""
     }
 
     /// Stops the process, forcefully if it has not exited within two seconds.

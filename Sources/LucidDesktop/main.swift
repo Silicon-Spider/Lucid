@@ -15,7 +15,7 @@ if let flag = arguments.firstIndex(of: "--self-test") {
 if arguments.contains("--install-launcher") {
     // Adds Lucid to the desktop's menu of applications, so it opens without a terminal.
     // scripts/setup-linux.sh does this once the app is built.
-    exit(lucid_install_launcher() ? 0 : 1)
+    exit(lucid_install_launcher(true) ? 0 : 1)
 }
 
 // Two copies would both answer the dictation key. The first has been asked to show its window.

@@ -1,13 +1,17 @@
 #!/bin/bash
 # Builds dist/Lucid.app from the Swift package.
 #
+# LUCID_ENGINES=folder puts the engines in that folder inside the app, so that it needs
+# nothing from Homebrew. scripts/package-mac.sh does that, for the download.
+#
 # The bundle is signed ad hoc. macOS ties the Accessibility grant to the exact build, so
 # after rebuilding you need to switch Lucid off and on again in
 # System Settings > Privacy & Security > Accessibility.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-VERSION="0.1.0"
+VERSION=$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' Sources/LucidApp/Desk.swift)
+[ -n "$VERSION" ] || { echo "Could not read Lucid's version from Sources/LucidApp/Desk.swift." >&2; exit 1; }
 APP="dist/Lucid.app"
 
 swift build -c release --product Lucid 2>&1 | grep -vE "XCTest|xcrun|^[[:space:]]*$" | tail -3
@@ -48,5 +52,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+if [ -n "${LUCID_ENGINES:-}" ]; then
+  cp -R "$LUCID_ENGINES" "$APP/Contents/Resources/engines"
+  # Every program and library inside has to be signed before the app that holds them is.
+  find "$APP/Contents/Resources/engines" -type f \( -perm -u+x -o -name '*.dylib' \) -exec codesign --force --sign - {} \;
+fi
 codesign --force --sign - "$APP"
 echo "Built $APP (version $VERSION)"

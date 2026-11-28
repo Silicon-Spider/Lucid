@@ -235,7 +235,166 @@ bool lucid_set_opens_at_login(bool on) {
     return RegSetKeyValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_NAME, REG_SZ, mine, bytes) == ERROR_SUCCESS;
 }
 
-bool lucid_install_launcher(void) {
+/* ---- The Start menu ---- */
+
+/* Writes one picture into an icon file: its header, its pixels from the bottom row up, and
+   a mask that is not used but must be there. */
+static bool write_icon_picture(HANDLE file, const LucidCanvas *canvas) {
+    BITMAPINFOHEADER header;
+    memset(&header, 0, sizeof header);
+    header.biSize = sizeof header;
+    header.biWidth = canvas->width;
+    header.biHeight = canvas->height * 2; /* the picture and its mask */
+    header.biPlanes = 1;
+    header.biBitCount = 32;
+    DWORD written = 0;
+    if (!WriteFile(file, &header, sizeof header, &written, NULL)) return false;
+    for (int y = canvas->height - 1; y >= 0; y--) {
+        for (int x = 0; x < canvas->width; x++) {
+            /* An icon keeps colour and see-through apart, where the canvas has them multiplied. */
+            uint32_t pixel = canvas->pixels[y * canvas->width + x];
+            uint32_t alpha = pixel >> 24;
+            if (alpha != 0 && alpha != 255) {
+                uint32_t blue = (pixel & 0xff) * 255 / alpha, green = ((pixel >> 8) & 0xff) * 255 / alpha;
+                uint32_t red = ((pixel >> 16) & 0xff) * 255 / alpha;
+                pixel = (blue > 255 ? 255 : blue) | ((green > 255 ? 255 : green) << 8) | ((red > 255 ? 255 : red) << 16) | (alpha << 24);
+            }
+            if (!WriteFile(file, &pixel, sizeof pixel, &written, NULL)) return false;
+        }
+    }
+    DWORD mask_row = (DWORD)((canvas->width + 31) / 32 * 4);
+    uint8_t zeros[64];
+    memset(zeros, 0, sizeof zeros);
+    for (int y = 0; y < canvas->height; y++) {
+        if (!WriteFile(file, zeros, mask_row, &written, NULL)) return false;
+    }
+    return true;
+}
+
+/* Lucid's icon as a file, for its Start menu entry: white bars on a dark square, the same
+   as the icon of its window. Windows has no icon for a program that was not built with one. */
+static bool write_icon(const wchar_t *path) {
+    static const int sizes[] = {32, 48, 256};
+    enum { COUNT = 3 };
+    LucidCanvas pictures[COUNT];
+    bool drawn = true;
+    for (int index = 0; index < COUNT; index++) {
+        int size = sizes[index];
+        if (!lucid_canvas_make(&pictures[index], size, size)) {
+            drawn = false;
+            for (int made = 0; made < index; made++) lucid_canvas_free(&pictures[made]);
+            break;
+        }
+        float unit = (float)size / 32.0f;
+        lucid_fill_round(&pictures[index], 0, 0, (float)size, (float)size, 7 * unit, 0x151515, 1);
+        static const float heights[5] = {8, 16, 22, 16, 8};
+        static const float lefts[5] = {5, 10, 14.5f, 19, 24};
+        for (int bar = 0; bar < 5; bar++) {
+            lucid_fill_round(
+                &pictures[index], lefts[bar] * unit, (32 - heights[bar]) / 2 * unit,
+                (lefts[bar] + 3) * unit, (32 + heights[bar]) / 2 * unit, 1.5f * unit, 0xffffff, 1);
+        }
+    }
+    if (!drawn) return false;
+    GdiFlush();
+
+    HANDLE file = CreateFileW(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    bool saved = file != INVALID_HANDLE_VALUE;
+    if (saved) {
+        /* The list of pictures, then the pictures. */
+        uint16_t start[3] = {0, 1, COUNT};
+        DWORD written = 0;
+        saved = WriteFile(file, start, sizeof start, &written, NULL);
+        DWORD offset = (DWORD)(sizeof start + COUNT * 16);
+        for (int index = 0; index < COUNT && saved; index++) {
+            int size = sizes[index];
+            DWORD bytes = (DWORD)(sizeof(BITMAPINFOHEADER) + (size_t)size * (size_t)size * 4 + (size_t)((size + 31) / 32 * 4) * (size_t)size);
+            uint8_t entry[16];
+            memset(entry, 0, sizeof entry);
+            entry[0] = (uint8_t)(size >= 256 ? 0 : size); /* 0 stands for 256 */
+            entry[1] = entry[0];
+            entry[4] = 1;  /* planes */
+            entry[6] = 32; /* bits for each pixel */
+            memcpy(entry + 8, &bytes, 4);
+            memcpy(entry + 12, &offset, 4);
+            saved = WriteFile(file, entry, sizeof entry, &written, NULL);
+            offset += bytes;
+        }
+        for (int index = 0; index < COUNT && saved; index++) saved = write_icon_picture(file, &pictures[index]);
+        CloseHandle(file);
+    }
+    for (int index = 0; index < COUNT; index++) lucid_canvas_free(&pictures[index]);
+    return saved;
+}
+
+/* True when the Start menu entry is for another copy of Lucid that is still there. */
+static bool entry_is_anothers(const wchar_t *link, const wchar_t *program) {
+    if (!exists(link)) return false;
+    IShellLinkW *shortcut = NULL;
+    bool anothers = false;
+    if (SUCCEEDED(CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, &IID_IShellLinkW, (void **)&shortcut))) {
+        IPersistFile *file = NULL;
+        if (SUCCEEDED(IShellLinkW_QueryInterface(shortcut, &IID_IPersistFile, (void **)&file))) {
+            wchar_t target[1024];
+            target[0] = 0;
+            if (SUCCEEDED(IPersistFile_Load(file, link, STGM_READ))
+                && SUCCEEDED(IShellLinkW_GetPath(shortcut, target, (int)LUCID_COUNT(target), NULL, SLGP_RAWPATH))) {
+                anothers = target[0] != 0 && lstrcmpiW(target, program) != 0 && exists(target);
+            }
+            IPersistFile_Release(file);
+        }
+        IShellLinkW_Release(shortcut);
+    }
+    return anothers;
+}
+
+bool lucid_install_launcher(bool replace) {
+    wchar_t program[1024], programs[MAX_PATH], data[MAX_PATH];
+    DWORD length = GetModuleFileNameW(NULL, program, (DWORD)LUCID_COUNT(program));
+    if (length == 0 || length >= LUCID_COUNT(program)) return false;
+    if (FAILED(SHGetFolderPathW(NULL, CSIDL_PROGRAMS, NULL, SHGFP_TYPE_CURRENT, programs))) return false;
+    wchar_t link[MAX_PATH + 16];
+    wsprintfW(link, L"%s\\Lucid.lnk", programs);
+    HRESULT began = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+    if (!replace && entry_is_anothers(link, program)) {
+        if (SUCCEEDED(began)) CoUninitialize();
+        return true;
+    }
+
+    /* The icon is kept with Lucid's other files. Without it the entry gets a plain one. */
+    wchar_t icon[MAX_PATH + 32];
+    icon[0] = 0;
+    if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, SHGFP_TYPE_CURRENT, data))) {
+        wchar_t folder[MAX_PATH + 16];
+        wsprintfW(folder, L"%s\\Lucid", data);
+        CreateDirectoryW(folder, NULL);
+        wsprintfW(icon, L"%s\\Lucid.ico", folder);
+        if (!write_icon(icon)) icon[0] = 0;
+    }
+
+    wchar_t folder[1024];
+    lstrcpynW(folder, program, (int)LUCID_COUNT(folder));
+    wchar_t *slash = wcsrchr(folder, L'\\');
+    if (slash) *slash = 0;
+    IShellLinkW *shortcut = NULL;
+    bool done = false;
+    if (SUCCEEDED(CoCreateInstance(&CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER, &IID_IShellLinkW, (void **)&shortcut))) {
+        IShellLinkW_SetPath(shortcut, program);
+        IShellLinkW_SetWorkingDirectory(shortcut, folder);
+        IShellLinkW_SetDescription(shortcut, L"Dictation that runs on this PC");
+        if (icon[0]) IShellLinkW_SetIconLocation(shortcut, icon, 0);
+        IPersistFile *file = NULL;
+        if (SUCCEEDED(IShellLinkW_QueryInterface(shortcut, &IID_IPersistFile, (void **)&file))) {
+            done = SUCCEEDED(IPersistFile_Save(file, link, TRUE));
+            IPersistFile_Release(file);
+        }
+        IShellLinkW_Release(shortcut);
+    }
+    if (SUCCEEDED(began)) CoUninitialize();
+    return done;
+}
+
+bool lucid_allow_keys(void) {
     return false;
 }
 

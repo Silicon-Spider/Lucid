@@ -1,0 +1,276 @@
+name: Packages
+
+# Makes the downloads: Lucid for each system, with its engines inside, so that nobody who
+# downloads one has to build anything or open a terminal.
+#
+# On a pull request they are made and tried, and kept with the run, under Artifacts.
+# On a tag such as v0.1.0 they are also attached to the release of that name. Publishing a
+# release on GitHub's Releases page, with a new tag, is all it takes.
+
+on:
+  pull_request:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: packages-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Built on the oldest Ubuntu still in use, so that the result runs there and on anything newer.
+  linux:
+    name: Make the Linux downloads
+    runs-on: ubuntu-22.04
+    container: swift:6.0-jammy
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install what the build needs
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            libgtk-3-dev libxi-dev libxtst-dev libcurl4-openssl-dev \
+            cmake g++ git curl ca-certificates binutils dpkg-dev
+
+      # The speech engine is built from its source, which takes minutes. Kept between runs.
+      - name: Keep the engines
+        uses: actions/cache@v4
+        with:
+          path: engine-cache
+          key: lucid-linux-engines-${{ hashFiles('scripts/package-linux.sh') }}
+
+      - name: Make them
+        run: LUCID_ENGINE_CACHE="$PWD/engine-cache" scripts/package-linux.sh
+
+      - name: Upload them
+        uses: actions/upload-artifact@v4
+        with:
+          name: lucid-linux
+          path: dist/*
+          if-no-files-found: error
+
+  # Installs the package the way opening it does, on a computer other than the one that made
+  # it, which has none of Lucid's engines, and dictates with what was installed.
+  linux-try:
+    name: Try the Linux download on ${{ matrix.os }}
+    needs: linux
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: lucid-linux
+          path: dist
+
+      - name: Install the package
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ./dist/lucid_*_amd64.deb
+
+      - name: Check what was installed
+        run: |
+          sudo apt-get install -y --no-install-recommends desktop-file-utils
+          desktop-file-validate /usr/share/applications/lucid.desktop
+          test -f /usr/share/icons/hicolor/256x256/apps/lucid.png
+          # Everything the app and its engines load came with them, or with what the package asks for.
+          for program in /opt/lucid/Lucid /opt/lucid/lucid-cli /opt/lucid/engines/*/*-server; do
+            if ldd "$program" | grep "not found"; then echo "$program cannot load those."; exit 1; fi
+          done
+          # Nor does Lucid lean on Swift's libraries, which these machines have and most do not.
+          if ldd /opt/lucid/Lucid /opt/lucid/lucid-cli | grep -i swift; then
+            echo "Lucid needs Swift's libraries, which should be inside it."
+            exit 1
+          fi
+          # With nothing of this computer's own to go by: only what the package brought.
+          env -i HOME="$HOME" /opt/lucid/lucid-cli doctor > doctor.txt 2>&1 || true
+          cat doctor.txt
+          test "$(grep -c '/opt/lucid/engines/' doctor.txt)" -ge 2
+          # The other download, unpacked anywhere.
+          mkdir unpacked
+          tar -xzf dist/Lucid-*-linux-x64.tar.gz -C unpacked
+          env -i HOME="$HOME" unpacked/Lucid/lucid-cli doctor > unpacked.txt 2>&1 || true
+          test "$(grep -c 'unpacked/Lucid/engines/' unpacked.txt)" -ge 2
+
+      - name: Install what the check needs
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            xvfb openbox dbus-x11 xcompmgr pulseaudio pulseaudio-utils imagemagick \
+            espeak-ng xdotool curl gcc pkg-config libgtk-3-dev libxi-dev libxtst-dev
+
+      - name: Keep the models
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/Lucid/models
+          key: lucid-models-base-en-s1-mini
+
+      # What Lucid's window does when "Download Models" is pressed, with a small speech model.
+      - name: Download the models
+        run: |
+          test -f ~/.local/share/Lucid/models/ggml-base.en.bin || /opt/lucid/lucid-cli download ggerganov/whisper.cpp ggml-base.en.bin
+          test -f ~/.local/share/Lucid/models/s1-mini-q4_k_m.gguf || /opt/lucid/lucid-cli download superwhisper/s1-mini-GGUF s1-mini-q4_k_m.gguf
+
+      - name: Dictate with the installed app
+        timeout-minutes: 10
+        run: LUCID_APP_FOLDER=/opt/lucid scripts/integration-linux.sh pictures
+
+      - name: Upload the pictures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-download-${{ matrix.os }}
+          path: linux-app-pictures
+          if-no-files-found: ignore
+
+  windows:
+    name: Make and try the Windows download
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # The action is pinned to the commit of v0.5.1, as in ci.yml.
+      - name: Install Swift
+        uses: compnerd/gha-setup-swift@9ff1ee4c44888c5817fc14d1b257ac8cabb4935f
+        with:
+          swift-version: swift-6.2.3-release
+          swift-build: 6.2.3-RELEASE
+
+      - name: Make it
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts\package-windows.ps1
+
+      # Unpacked somewhere else, and run with only Windows' own folders to look in, as on a
+      # PC that has never had Swift.
+      - name: Try it where there is no Swift
+        timeout-minutes: 10
+        run: |
+          $zip = Get-ChildItem dist\Lucid-*-windows-x64.zip
+          $where = Join-Path $env:RUNNER_TEMP 'unpacked'
+          Expand-Archive $zip.FullName -DestinationPath $where
+          $app = Join-Path $where 'Lucid'
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+
+          New-Item -ItemType Directory -Force windows-download | Out-Null
+          $report = Join-Path $PWD 'windows-download\self-test.txt'
+          $run = Start-Process (Join-Path $app 'Lucid.exe') -ArgumentList '--self-test', "`"$report`"" -Wait -PassThru
+          if (Test-Path $report) { Get-Content $report }
+          if ($run.ExitCode -ne 0) { throw "The unpacked app failed its self-test (exit code $($run.ExitCode))." }
+
+          $doctor = & { $ErrorActionPreference = 'Continue'; & (Join-Path $app 'lucid-cli.exe') doctor 2>&1 | Out-String }
+          Write-Host $doctor
+          $inside = @($doctor -split "`n" | Where-Object { $_ -match 'engine' -and $_ -match 'unpacked' })
+          if ($inside.Count -lt 2) { throw 'The unpacked Lucid does not find its own engines.' }
+
+          foreach ($engine in Get-ChildItem (Join-Path $app 'engines') -Recurse -Include whisper-server.exe, llama-server.exe) {
+            $ErrorActionPreference = 'Continue'
+            & $engine.FullName --help *> $null
+            $code = $LASTEXITCODE
+            $ErrorActionPreference = 'Stop'
+            if ($code -ne 0) { throw "$($engine.Name) does not start (exit code $code)." }
+            Write-Host "$($engine.Name) starts."
+          }
+          exit 0
+
+      - name: Upload it
+        uses: actions/upload-artifact@v4
+        with:
+          name: lucid-windows
+          path: dist/*.zip
+          if-no-files-found: error
+
+      - name: Upload the pictures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-download
+          path: windows-download
+          if-no-files-found: ignore
+
+  mac:
+    name: Make and try the Mac download
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Keep the engines
+        uses: actions/cache@v4
+        with:
+          path: engine-cache
+          key: lucid-mac-engines-${{ hashFiles('scripts/package-mac.sh') }}
+
+      - name: Make it
+        run: LUCID_ENGINE_CACHE="$PWD/engine-cache" scripts/package-mac.sh
+
+      # Unpacked somewhere else, with only the system's own folders to look in, as on a Mac
+      # that has never had Homebrew.
+      - name: Try it from somewhere else
+        timeout-minutes: 10
+        run: |
+          mkdir "$RUNNER_TEMP/unpacked"
+          ditto -x -k dist/Lucid-*-mac-arm64.zip "$RUNNER_TEMP/unpacked"
+          APP="$RUNNER_TEMP/unpacked/Lucid.app"
+          codesign --verify --deep --strict "$APP"
+          env -i HOME="$HOME" PATH=/usr/bin:/bin "$APP/Contents/MacOS/Lucid" --where | tee where.txt
+          test "$(grep -c 'Lucid.app/Contents/Resources/engines/' where.txt)" -ge 2
+          "$APP/Contents/Resources/engines/whisper-server/whisper-server" --help > /dev/null 2>&1
+          echo "whisper-server starts."
+          "$APP/Contents/Resources/engines/llama-server/llama-server" --version
+          echo "llama-server starts."
+          "$APP/Contents/MacOS/Lucid" --render-ui "$RUNNER_TEMP/ui"
+
+      - name: Upload it
+        uses: actions/upload-artifact@v4
+        with:
+          name: lucid-mac
+          path: dist/*.zip
+          if-no-files-found: error
+
+  # Only for a tag: puts the downloads on the release of that name, making it if need be.
+  release:
+    name: Attach the downloads to the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, linux-try, windows, mac]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag is this version's
+        run: |
+          VERSION=$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' Sources/LucidApp/Desk.swift)
+          if [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "This tag is $GITHUB_REF_NAME, but Lucid says it is version $VERSION. Change Sources/LucidApp/Desk.swift, or the tag."
+            exit 1
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: lucid-*
+          path: downloads
+          merge-multiple: true
+
+      - name: Attach them
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la downloads
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" downloads/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" downloads/* --title "Lucid ${GITHUB_REF_NAME#v}" --generate-notes
+          fi

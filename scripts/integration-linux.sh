@@ -6,6 +6,10 @@
 # Run scripts/setup-linux.sh first: this uses the engines and models it installs. Your own
 # settings and history are not touched.
 #
+# LUCID_APP_FOLDER=folder tries the Lucid in that folder instead of the one built here, such
+# as /opt/lucid, where the downloaded package puts it. That one has its engines inside, so
+# only the models need to be there already.
+#
 # Besides what scripts/test-linux-layer.sh needs, this needs espeak-ng, xdotool and curl:
 #   sudo apt-get install espeak-ng xdotool curl imagemagick
 #
@@ -23,9 +27,12 @@ need curl "Install curl."
 need python3 "Install python3."
 need pkg-config "Install pkg-config."
 
-BIN=$(swift build -c release --show-bin-path)
-[ -x "$BIN/Lucid" ] && [ -x "$BIN/lucid-cli" ] || { echo "Run scripts/setup-linux.sh first: Lucid is not built." >&2; exit 1; }
-ENGINES=$("$BIN/lucid-cli" folder engines)
+BIN="${LUCID_APP_FOLDER:-}"
+[ -n "$BIN" ] || BIN=$(swift build -c release --show-bin-path)
+[ -x "$BIN/Lucid" ] && [ -x "$BIN/lucid-cli" ] || { echo "Run scripts/setup-linux.sh first: there is no Lucid in $BIN." >&2; exit 1; }
+# A Lucid that has its engines inside needs none from anywhere else.
+ENGINES=
+[ -d "$BIN/engines" ] || ENGINES=$("$BIN/lucid-cli" folder engines)
 MODELS=$("$BIN/lucid-cli" folder models)
 
 WORK=$(mktemp -d)
@@ -41,9 +48,9 @@ rm -f -- "$OUT/window.txt" "$OUT/editor.txt" "$OUT/app.log"
 # The editor that is typed into, and the stand-in for the browser, are the layer's test
 # program in two of its guises.
 # shellcheck disable=SC2046
-${CC:-cc} -std=gnu11 -O1 $(pkg-config --cflags ayatana-appindicator3-0.1 xi xtst) -ISources/CLucidDesk/include \
+${CC:-cc} -std=gnu11 -O1 $(pkg-config --cflags gtk+-3.0 xi xtst) -ISources/CLucidDesk/include \
   Sources/CLucidDesk/linux/*.c Tests/CLucidDeskTests/linux.c -o "$WORK/linux-layer-tests" \
-  $(pkg-config --libs ayatana-appindicator3-0.1 xi xtst) -lX11 -lm -lpthread
+  $(pkg-config --libs gtk+-3.0 xi xtst) -lX11 -lm -lpthread -ldl
 
 # What is said, with a pause before and after, as a person would leave.
 SAID="Um, so I was thinking we could, uh, meet at two. Actually no, make that three, at the usual place."
@@ -79,7 +86,7 @@ FAILED=0
 
 # Lucid's own folder here, with the real engines and models in it.
 mkdir -p "$XDG_DATA_HOME/Lucid"
-ln -s "$LUCID_REAL_ENGINES" "$XDG_DATA_HOME/Lucid/engines"
+[ -n "$LUCID_REAL_ENGINES" ] && ln -s "$LUCID_REAL_ENGINES" "$XDG_DATA_HOME/Lucid/engines"
 ln -s "$LUCID_REAL_MODELS" "$XDG_DATA_HOME/Lucid/models"
 printf '{"models":{"speech":"%s"}}' "$LUCID_SPEECH_MODEL" > "$XDG_DATA_HOME/Lucid/settings.json"
 
@@ -110,8 +117,16 @@ done
 if [ "$READY" = 1 ]; then ok "the engines start and Home says Lucid is ready"; else
   fail "the engines start and Home says Lucid is ready"
   state | field "[c['title'] + ': ' + c['detail'] for c in d['status']['checks'] if not c['done']]"
+  # What each engine wrote before it stopped, if it wrote anything.
+  for LOG in "$XDG_DATA_HOME"/Lucid/logs/*.log; do
+    [ -f "$LOG" ] || continue
+    echo "  the last of $(basename "$LOG") ($(wc -c < "$LOG") bytes):"
+    tail -n 15 "$LOG" | sed 's/^/    /'
+  done
 fi
 [ "$(state | field "d['app']['system']")" = Linux ] && ok "the window says it is on Linux" || fail "the window says it is on Linux"
+# Which engines are running, to tell the ones inside the app from any others.
+pgrep -a -x "whisper-server|llama-server" | grep "$XDG_DATA_HOME" | awk '{ print "  engine: " $2 }'
 
 "$LUCID_WORK/linux-layer-tests" editor &
 EDITOR=$!

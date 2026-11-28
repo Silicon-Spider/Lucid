@@ -6,10 +6,12 @@
 #   scripts\setup.ps1 -WithGeneral                   also Qwen 3.5 4B (2.6 GB), for the Medium level
 #   scripts\setup.ps1 -SpeechModel ggml-base.en.bin  a smaller, faster speech model instead
 #   scripts\setup.ps1 -NoApp                         only what lucid-cli needs, without the app
+#   scripts\setup.ps1 -EnginesInto folder            only the engines, into that folder
 param(
     [switch]$WithGeneral,
     [string]$SpeechModel = 'ggml-large-v3-turbo-q5_0.bin',
-    [switch]$NoApp
+    [switch]$NoApp,
+    [string]$EnginesInto
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,17 +27,23 @@ function Invoke-Program([scriptblock]$Command, [string]$Failure) {
     if ($LASTEXITCODE -ne 0) { throw $Failure }
 }
 
-if (-not (Get-Command swift -ErrorAction SilentlyContinue)) {
-    throw 'Swift is required. Install it from https://www.swift.org/install/windows and run this again.'
+if ($EnginesInto) {
+    # For scripts\package-windows.ps1, which puts the engines inside the download.
+    New-Item -ItemType Directory -Force -Path $EnginesInto | Out-Null
+    $engines = (Resolve-Path $EnginesInto).Path
+} else {
+    if (-not (Get-Command swift -ErrorAction SilentlyContinue)) {
+        throw 'Swift is required. Install it from https://www.swift.org/install/windows and run this again.'
+    }
+
+    Write-Host 'build    lucid-cli'
+    Invoke-Program { swift build -c release --product lucid-cli } 'lucid-cli did not build.'
+    $cli = Join-Path (swift build -c release --show-bin-path) 'lucid-cli.exe'
+
+    $engines = & $cli folder engines
+    $models = & $cli folder models
+    if (-not $engines -or -not $models) { throw 'lucid-cli did not say where its folders are.' }
 }
-
-Write-Host 'build    lucid-cli'
-Invoke-Program { swift build -c release --product lucid-cli } 'lucid-cli did not build.'
-$cli = Join-Path (swift build -c release --show-bin-path) 'lucid-cli.exe'
-
-$engines = & $cli folder engines
-$models = & $cli folder models
-if (-not $engines -or -not $models) { throw 'lucid-cli did not say where its folders are.' }
 
 # Finds the download of an engine on GitHub that suits this PC: the zip whose name has every
 # word in $Wanted and none in $Unwanted. Not every release comes with programs for Windows, so
@@ -93,6 +101,7 @@ function Install-Engine([string]$Program, [string]$Repository, [string[]]$Wanted
 # The plain builds, which run on any PC's processor. The others need a particular graphics card.
 Install-Engine 'whisper-server.exe' 'ggml-org/whisper.cpp' @('bin', 'x64') @('cublas', 'cuda', 'blas', 'vulkan', 'openvino', 'arm')
 Install-Engine 'llama-server.exe' 'ggml-org/llama.cpp' @('bin', 'win', 'cpu', 'x64') @('arm')
+if ($EnginesInto) { return }
 
 function Get-Model([string]$Repository, [string]$File) {
     if (Test-Path (Join-Path $models $File)) {

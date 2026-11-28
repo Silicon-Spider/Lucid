@@ -60,7 +60,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libgtk-3-dev libayatana-appindicator3-dev libxi-dev libxtst-dev \
+            libgtk-3-dev libxi-dev libxtst-dev libayatana-appindicator3-1 \
             xvfb openbox dbus-x11 xcompmgr pulseaudio pulseaudio-utils xterm imagemagick
 
       - name: Swift version
@@ -109,17 +109,31 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libgtk-3-dev libayatana-appindicator3-dev libxi-dev libxtst-dev \
+            libgtk-3-dev libxi-dev libxtst-dev libayatana-appindicator3-1 \
             xvfb openbox dbus-x11 xcompmgr pulseaudio pulseaudio-utils imagemagick \
             espeak-ng xdotool curl cmake g++
 
-      # The engines, one of them built from its source, and about 600 MB of models. Kept
-      # between runs, so that is done once.
-      - name: Keep the engines and models
+      # About 600 MB of models, kept between runs so that they are downloaded once.
+      - name: Keep the models
         uses: actions/cache@v4
         with:
-          path: ~/.local/share/Lucid
-          key: lucid-linux-${{ hashFiles('scripts/setup-linux.sh') }}
+          path: ~/.local/share/Lucid/models
+          key: lucid-linux-models-${{ hashFiles('scripts/setup-linux.sh') }}
+
+      # The speech engine is built from its source for the processor it is built on, and
+      # these machines do not all have the same one: an engine built on one stops at once
+      # on another that lacks an instruction it uses. So each kind of processor keeps its own.
+      - name: See which processor this is
+        id: processor
+        run: |
+          grep -m1 '^model name' /proc/cpuinfo
+          echo "kind=$(grep -m1 '^flags' /proc/cpuinfo | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      - name: Keep the engines
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/Lucid/engines
+          key: lucid-linux-engines-${{ hashFiles('scripts/setup-linux.sh') }}-${{ steps.processor.outputs.kind }}
 
       # A small speech model: the machine has no graphics card to speed up a large one.
       - name: Set up
@@ -169,7 +183,7 @@ jobs:
         timeout-minutes: 5
         run: |
           New-Item -ItemType Directory -Force windows-pictures | Out-Null
-          clang -std=c11 -O1 -D_CRT_SECURE_NO_WARNINGS -ISources/CLucidDesk/include (Get-ChildItem Sources/CLucidDesk/windows/*.c) Tests/CLucidDeskTests/windows.c -o harness.exe -luser32 -lgdi32 -lshell32 -lwinmm -lcomdlg32 -ladvapi32 -lversion
+          clang -std=c11 -O1 -D_CRT_SECURE_NO_WARNINGS -ISources/CLucidDesk/include (Get-ChildItem Sources/CLucidDesk/windows/*.c) Tests/CLucidDeskTests/windows.c -o harness.exe -luser32 -lgdi32 -lshell32 -lwinmm -lcomdlg32 -ladvapi32 -lversion -lole32 -luuid
           if ($LASTEXITCODE -ne 0) { throw 'The Windows layer did not build.' }
           .\harness.exe windows-pictures
           if ($LASTEXITCODE -ne 0) { throw 'The Windows layer failed its checks.' }

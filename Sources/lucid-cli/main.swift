@@ -166,6 +166,12 @@ func runDoctor(_ arguments: Arguments) throws -> Int32 {
     }
     print("\nNot installed:")
     for item in missing { print("  - \(item)") }
+    let files = FileManager.default
+    if files.isExecutableFile(atPath: config.whisperServer.path), files.isExecutableFile(atPath: config.llamaServer.path) {
+        // Only models are missing, and Lucid can fetch those itself.
+        print("\nOpen Lucid and press Download Models, or fetch them with lucid-cli download.")
+        return 1
+    }
     #if os(Windows)
     print("\nRun scripts\\setup.ps1 in PowerShell to install what is missing.")
     #elseif os(macOS)

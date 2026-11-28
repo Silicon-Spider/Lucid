@@ -32,16 +32,62 @@ voice, and checks that the cleaned sentence is typed into an editor. Nobody has 
 on a real desktop with a real microphone, and what it does in a Wayland session has only
 been tried with stand-ins for the keyboard. See [what differs on Linux](#linux).
 
-## Requirements
+## Get Lucid
 
-These are for the Mac. For a PC, see [Windows](#windows) or [Linux](#linux).
+Download the one for your computer from the
+[latest release](https://github.com/Silicon-Spider/Lucid/releases/latest). Each has the
+speech and cleanup engines inside it, so there is nothing to build and no terminal to open.
+Lucid needs about 1.1 GB of disk for its models, and about 2.5 GB of memory while it runs.
+
+**Windows 10 or 11**: `Lucid-…-windows-x64.zip`
+
+1. Right-click the download and choose **Extract All**. Put the Lucid folder somewhere it
+   can stay, such as Documents.
+2. Open the folder and open **Lucid**. Windows says it protected your PC, because Lucid is
+   not signed: choose **More info**, then **Run anyway**.
+3. Lucid appears beside the clock, and adds itself to the Start menu for next time.
+
+**A Mac with Apple Silicon, macOS 14 or later**: `Lucid-…-mac-arm64.zip`
+
+1. Open the download to unpack it, and drag **Lucid** to Applications.
+2. Open it. macOS says it could not check Lucid, because it is not signed with a
+   certificate from Apple: open System Settings, Privacy & Security, scroll down, and press
+   **Open Anyway**.
+3. Lucid appears in the menu bar. Its window asks for the microphone and for Accessibility:
+   see [the Setup list](#the-setup-list-on-a-mac).
+
+**Ubuntu, Debian and their relatives**: `lucid_…_amd64.deb`
+
+1. Open the download and press **Install**.
+2. Open **Lucid** from your applications menu. It appears in the panel.
+
+**Any other Linux**: `Lucid-…-linux-x64.tar.gz`
+
+1. Unpack it, and put the Lucid folder somewhere it can stay.
+2. Open **Lucid** in that folder. In some file managers that is a double click, in others a
+   right click and **Run as a Program**. It adds itself to your applications menu.
+
+**Then, on any of them**, Lucid's window opens at Home. Press **Download Models** there. That
+is about 1 GB, once. When every item under Setup is ticked, hold the dictation key and speak.
+
+In a Wayland session on Linux, which is what Ubuntu and Fedora start by default, Home has
+one more button: **Allow Lucid to Use the Keyboard…**. Press it and give your password.
+[Linux](#linux) says what that allows, and why it is needed.
+
+The downloads are made by GitHub Actions from this repository, and each is tried there
+before it is published: installed or unpacked away from where it was built, and started
+with nothing to go by but what it brought. The Linux package is installed on Ubuntu 22.04
+and 24.04, and a sentence is dictated with it. None of the downloads is signed, which is why
+Windows and macOS ask you to confirm.
+
+## Build it yourself
+
+Lucid can also be built from its source, which is what the rest of this section and the
+sections on [Windows](#windows) and [Linux](#linux) describe. On a Mac that needs:
 
 - A Mac with Apple Silicon, running macOS 14 or later.
 - [Homebrew](https://brew.sh).
 - The Swift compiler. `xcode-select --install` provides it. Xcode is not needed.
-- About 1.1 GB of disk for the models, and about 2.5 GB of memory while Lucid runs.
-
-## Install
 
 ```bash
 git clone https://github.com/Silicon-Spider/Lucid.git
@@ -55,6 +101,8 @@ After that, Lucid opens like any other app: double-click `dist/Lucid.app` in the
 drag it to Applications first. On [Windows](#windows) and [Linux](#linux), the setup script
 adds it to the Start menu or the applications menu.
 
+### The Setup list on a Mac
+
 A waveform icon appears in the menu bar, and Lucid's window opens at Home. Its Setup list
 walks you through four things:
 
@@ -62,8 +110,8 @@ walks you through four things:
 2. **Accessibility.** Switch Lucid on in System Settings, Privacy & Security,
    Accessibility. Lucid needs this to see the dictation key and to type for you. If the
    list then offers Restart Lucid, press it.
-3. **Speech engines and models.** Ticked once `scripts/setup.sh` has run. If only the models
-   are missing, the list can download them.
+3. **Speech engines and models.** A downloaded Lucid has its engines inside, and one you
+   built gets them from `scripts/setup.sh`. The list can download the models.
 4. **The dictation key.** On a MacBook this is Fn. macOS also uses Fn for its own
    shortcut, so set "Press 🌐 key to" to "Do Nothing" in Keyboard settings, or choose
    Right Option in the list.
@@ -221,8 +269,9 @@ text is pasted into the app you are in. Tap the key twice to keep recording hand
 press Escape to cancel. The pill at the bottom of the screen shows the microphone level and
 the last words heard.
 
-It needs Windows 10 or 11 on a 64-bit PC, about 1.1 GB of disk for the models, and
-[Swift](https://www.swift.org/install/windows) 6.2 or later to build it. In PowerShell:
+[Get Lucid](#get-lucid) has the download, which needs Windows 10 or 11 on a 64-bit PC. To
+build it yourself instead, install [Swift](https://www.swift.org/install/windows) 6.2 or
+later, then in PowerShell:
 
 ```powershell
 git clone https://github.com/Silicon-Spider/Lucid.git
@@ -270,12 +319,13 @@ pasted into the app you are in, terminals included. Tap the key twice to keep re
 hands-free, and press Escape to cancel. The pill at the bottom of the screen shows the
 microphone level and the last words heard.
 
-It needs a 64-bit Linux desktop, about 1.1 GB of disk for the models,
-[Swift](https://www.swift.org/install/linux) to build it, and git, curl, cmake and a C++
-compiler to build the speech engine. The app is built on GTK. On Ubuntu or Debian:
+[Get Lucid](#get-lucid) has the downloads, which need a 64-bit Linux desktop as recent as
+Ubuntu 22.04. To build it yourself instead, you need
+[Swift](https://www.swift.org/install/linux), and git, curl, cmake and a C++ compiler to
+build the speech engine. The app is built on GTK. On Ubuntu or Debian:
 
 ```bash
-sudo apt-get install libgtk-3-dev libayatana-appindicator3-dev libxi-dev libxtst-dev cmake g++ git curl
+sudo apt-get install libgtk-3-dev libxi-dev libxtst-dev libayatana-appindicator3-1 cmake g++ git curl
 ```
 
 ```bash
@@ -297,14 +347,16 @@ The window has the same parts as on the Mac. What differs:
 - **Wayland.** A Wayland session does not show an app the keys you press in other apps, and
   does not let one app press keys in another. So there, out of the box, the dictation key
   does nothing, and Home says so. There are two ways round it. Sign in with an X11 session
-  (“Ubuntu on Xorg”, “Plasma (X11)”), where everything works as described. Or run
-  `scripts/setup-linux.sh --allow-keys`, which lets the programs you run read the keyboards
-  and make one of their own: Lucid then sees the key and can paste. That is the same access
-  every program has in an X11 session, and you can undo it by deleting the file it names.
-- **The icon.** Lucid's icon needs a panel that shows app indicators. Ubuntu, KDE, XFCE and
-  Cinnamon do. GNOME elsewhere needs the “AppIndicator and KStatusNotifierItem Support”
-  extension. Without an icon Lucid still works: open it again from the applications menu and
-  its window comes up.
+  (“Ubuntu on Xorg”, “Plasma (X11)”), where everything works as described. Or press
+  **Allow Lucid to Use the Keyboard…** on Home and give your password. That lets the
+  programs you run read the keyboards and make one of their own: Lucid then sees the key and
+  can paste. It is the same access every program has in an X11 session. It is one file,
+  `/etc/udev/rules.d/70-lucid.rules`, and deleting that file undoes it.
+  `scripts/setup-linux.sh --allow-keys` does the same from a terminal.
+- **The icon.** Lucid's icon needs a panel that shows app indicators, and the library that
+  talks to it. Ubuntu, KDE, XFCE and Cinnamon have both. GNOME elsewhere needs the
+  “AppIndicator and KStatusNotifierItem Support” extension. Without an icon Lucid still
+  works: open it again from the applications menu and its window comes up.
 - The dictation key is Right Ctrl, Right Alt or Right Shift.
 - Lucid pastes with Shift+Insert, which works in terminals where Ctrl+V does not. For that
   it also puts the text where a terminal pastes from, the selection.
@@ -362,6 +414,16 @@ scripts/integration.sh    # the whole pipeline on synthesised speech
 - on Windows, runs `scripts\setup.ps1` and `scripts\integration.ps1`: the real engines and
   models, turning synthesised speech into clean text.
 
+A second workflow, [`.github/workflows/packages.yml`](.github/workflows/packages.yml), makes
+the [downloads](#get-lucid) with `scripts/package-linux.sh`, `scripts\package-windows.ps1`
+and `scripts/package-mac.sh`, and tries each one away from where it was built. On Linux it
+installs the package on Ubuntu 22.04 and 24.04, checks that it leans on nothing of Swift's,
+and dictates with what was installed. On Windows it starts the unpacked app with only
+Windows' own folders to look in. On a Mac it checks that the app finds the engines inside
+itself and that they start. For
+a tag such as `v0.1.0` it attaches the downloads to the release of that name, so publishing
+a release on GitHub, with a new tag, is all it takes to put out a version.
+
 On a Linux computer, `scripts/test-linux-layer.sh` and `scripts/integration-linux.sh` run
 those checks of the Linux app, and `scripts/test-windows-layer.sh` runs the tests of the
 Windows part under Wine. None of them touches your desktop: each makes one of its own.
@@ -416,8 +478,11 @@ appears at the prompt.
 ## Limits
 
 - English only.
-- The Windows and Linux apps have to be built from source, and have had far less use than
-  the Mac app. See what differs on [Windows](#windows) and on [Linux](#linux).
+- The Windows and Linux apps have had far less use than the Mac app. See what differs on
+  [Windows](#windows) and on [Linux](#linux).
+- The downloads are not signed, so Windows and macOS ask you to confirm before they open
+  Lucid the first time. On a Mac, each new version needs Accessibility switched off and on
+  again for Lucid in System Settings, because macOS ties that permission to the exact build.
 - On Linux in a Wayland session, the dictation key and pasting only work once you allow
   them, as [Linux](#linux) explains.
 - Lucid uses the computer's default microphone. Change it in the system's sound settings.

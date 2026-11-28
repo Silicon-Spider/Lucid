@@ -34,6 +34,8 @@ const char *lucid_cache_folder(void);
 bool lucid_icon_save(int look, const char *path, double size);
 
 /* Each part's share of starting and stopping. */
+/* Tries again to make the keyboard Lucid pastes with, after the user has allowed it. */
+void lucid_typing_retry(void);
 bool lucid_keys_start(void);
 void lucid_keys_stop(void);
 void lucid_typing_start(void);

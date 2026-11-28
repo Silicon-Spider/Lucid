@@ -242,9 +242,45 @@ bool lucid_set_opens_at_login(bool on) {
 
 /* ---- The menu of applications ---- */
 
-bool lucid_install_launcher(void) {
+/* The program that an entry in the menu starts, without the quotes its file wraps it in. */
+static char *entry_program(const char *path) {
+    GKeyFile *file = g_key_file_new();
+    char *program = NULL;
+    if (g_key_file_load_from_file(file, path, G_KEY_FILE_NONE, NULL)) {
+        char *command = g_key_file_get_string(file, "Desktop Entry", "Exec", NULL);
+        gint count = 0;
+        char **words = NULL;
+        if (command && g_shell_parse_argv(command, &count, &words, NULL) && count > 0) program = g_strdup(words[0]);
+        g_strfreev(words);
+        g_free(command);
+    }
+    g_key_file_free(file);
+    return program;
+}
+
+bool lucid_install_launcher(bool replace) {
+    /* A package that was installed for everyone brought its own entry. One for this user
+       as well would outlive the package if it were removed. */
+    for (const char *const *shared = g_get_system_data_dirs(); *shared; shared++) {
+        char *entry = g_build_filename(*shared, "applications", "lucid.desktop", NULL);
+        bool there = g_file_test(entry, G_FILE_TEST_EXISTS);
+        g_free(entry);
+        if (there) return true;
+    }
     char *mine = own_path();
     if (!mine) return false;
+    if (!replace) {
+        /* An entry for a copy of Lucid that is still there is that copy's. */
+        char *existing = g_build_filename(g_get_user_data_dir(), "applications", "lucid.desktop", NULL);
+        char *program = entry_program(existing);
+        bool keep = program && strcmp(program, mine) != 0 && g_file_test(program, G_FILE_TEST_IS_EXECUTABLE);
+        g_free(program);
+        g_free(existing);
+        if (keep) {
+            g_free(mine);
+            return true;
+        }
+    }
     /* The icon, in the sizes desktops ask for. */
     static const int sizes[] = {48, 128, 256};
     for (size_t index = 0; index < G_N_ELEMENTS(sizes); index++) {
@@ -275,6 +311,46 @@ bool lucid_install_launcher(void) {
     g_free(folder);
     g_free(mine);
     return done;
+}
+
+/* ---- A Wayland session ---- */
+
+/* What lets the person signed in at this computer read the keyboards and make one. The
+   same lines are in scripts/setup-linux.sh. */
+static const char allow_script[] =
+    "set -e\n"
+    "cat > /etc/udev/rules.d/70-lucid.rules <<'RULES'\n"
+    "# Lets the person signed in at this computer use Lucid in a Wayland session: read the\n"
+    "# keyboards, to see the dictation key, and make a keyboard of its own, to paste.\n"
+    "KERNEL==\"uinput\", SUBSYSTEM==\"misc\", TAG+=\"uaccess\", OPTIONS+=\"static_node=uinput\"\n"
+    "SUBSYSTEM==\"input\", KERNEL==\"event*\", ENV{ID_INPUT_KEYBOARD}==\"1\", TAG+=\"uaccess\"\n"
+    "RULES\n"
+    "udevadm control --reload\n"
+    "udevadm trigger --subsystem-match=input --subsystem-match=misc\n";
+
+static void allowed(GPid asker, gint status, gpointer unused) {
+    (void)status;
+    (void)unused;
+    g_spawn_close_pid(asker);
+    /* The keyboards are looked for again every few seconds anyway. The keyboard to paste
+       with is only made when asked. */
+    lucid_typing_retry();
+}
+
+bool lucid_allow_keys(void) {
+    /* pkexec shows the desktop's own prompt for the password of someone who may change
+       the system, and runs one command for them if they give it. */
+    const char *stand_in = g_getenv("LUCID_TEST_PKEXEC");
+    char *asker = g_find_program_in_path(stand_in ? stand_in : "pkexec");
+    if (!asker) return false;
+    char *arguments[] = {asker, (char *)"/bin/sh", (char *)"-c", (char *)allow_script, NULL};
+    GPid started = 0;
+    bool asked = g_spawn_async(
+        NULL, arguments, NULL, G_SPAWN_DO_NOT_REAP_CHILD | G_SPAWN_STDOUT_TO_DEV_NULL | G_SPAWN_STDERR_TO_DEV_NULL,
+        NULL, NULL, &started, NULL);
+    if (asked) g_child_watch_add(started, allowed, NULL);
+    g_free(asker);
+    return asked;
 }
 
 void lucid_alert(const char *title, const char *text) {

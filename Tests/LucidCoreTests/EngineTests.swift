@@ -71,6 +71,24 @@ func engineTests() async {
             expectEqual(EngineConfig.findInEngines(name, under: folder.appendingPathComponent("missing")), nil)
         }
 
+        test("prefers the engines that came with the app") {
+            let files = FileManager.default
+            let folder = files.temporaryDirectory.appendingPathComponent("lucid-bundled-\(UUID().uuidString)")
+            defer { try? files.removeItem(at: folder) }
+            // Any program will do as a stand-in: what matters is where it is and what it is called.
+            let program = TestTools.failing.executable
+            let name = "whisper-server" + (program.pathExtension.isEmpty ? "" : "." + program.pathExtension)
+            let home = folder.appendingPathComponent("engines/whisper-server")
+            try files.createDirectory(at: home, withIntermediateDirectories: true)
+            try files.copyItem(at: program, to: home.appendingPathComponent(name))
+            let found = EngineConfig.findBinary("whisper-server", bundled: [folder.appendingPathComponent("engines")])
+            expectEqual(found.pathComponents.suffix(3).joined(separator: "/"), "engines/whisper-server/" + name)
+            // Without any, the answer is wherever else it is, or where Lucid expects it.
+            let elsewhere = EngineConfig.findBinary("whisper-server", bundled: [folder.appendingPathComponent("none")])
+            expectFalse(elsewhere.path.hasPrefix(folder.path))
+            expectTrue(EngineConfig.bundledEnginesDirectories.first?.lastPathComponent == "engines", "\(EngineConfig.bundledEnginesDirectories)")
+        }
+
         test("reports what is missing") {
             var config = EngineConfig.standard()
             config.whisperServer = URL(fileURLWithPath: "/nonexistent/whisper-server")
@@ -147,6 +165,32 @@ func engineTests() async {
                 }
             }
         }
+
+        #if !os(Windows)
+        await asyncTest("says so when a server was built for a different processor") {
+            // What the system does to such a program: it stops it with this signal, before
+            // the program can write anything in its log.
+            let log = temporaryFile(".log")
+            defer { try? FileManager.default.removeItem(at: log) }
+            let server = ServerProcess(
+                name: "wrong server",
+                executable: TestTools.python,
+                arguments: ["-c", "import os, signal, time\ntime.sleep(0.2)\nos.kill(os.getpid(), signal.SIGILL)"],
+                port: try ServerProcess.freePort(),
+                healthPath: "/",
+                logURL: log
+            )
+            try server.start()
+            do {
+                try await server.waitUntilReady(timeout: 10)
+                expectTrue(false, "expected an error")
+            } catch let error as EngineError {
+                let said = error.description
+                expectTrue(said.contains("built for a different processor"), said)
+                expectTrue(said.contains(log.path), said)
+            }
+        }
+        #endif
 
         test("pid file cleanup leaves unrelated processes alone") {
             let url = temporaryFile(".pid")

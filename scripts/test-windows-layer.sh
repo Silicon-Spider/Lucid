@@ -39,7 +39,7 @@ trap cleanup EXIT
 echo "build    the Windows layer and its tests, for Windows"
 x86_64-w64-mingw32-gcc -std=c11 -O1 -Wall -Wextra -Wshadow -Wconversion -Wno-sign-conversion -Werror \
     -ISources/CLucidDesk/include Sources/CLucidDesk/windows/*.c Tests/CLucidDeskTests/windows.c -o "$WORK/harness.exe" \
-    -luser32 -lgdi32 -lshell32 -lwinmm -lcomdlg32 -ladvapi32 -lversion
+    -luser32 -lgdi32 -lshell32 -lwinmm -lcomdlg32 -ladvapi32 -lversion -lole32 -luuid
 
 export WINEPREFIX="$WORK/prefix" WINEDEBUG=-all
 # Wine wants this folder to exist.
