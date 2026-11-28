@@ -166,6 +166,32 @@ func engineTests() async {
             }
         }
 
+        #if !os(Windows)
+        await asyncTest("says so when a server was built for a different processor") {
+            // What the system does to such a program: it stops it with this signal, before
+            // the program can write anything in its log.
+            let log = temporaryFile(".log")
+            defer { try? FileManager.default.removeItem(at: log) }
+            let server = ServerProcess(
+                name: "wrong server",
+                executable: TestTools.python,
+                arguments: ["-c", "import os, signal, time\ntime.sleep(0.2)\nos.kill(os.getpid(), signal.SIGILL)"],
+                port: try ServerProcess.freePort(),
+                healthPath: "/",
+                logURL: log
+            )
+            try server.start()
+            do {
+                try await server.waitUntilReady(timeout: 10)
+                expectTrue(false, "expected an error")
+            } catch let error as EngineError {
+                let said = error.description
+                expectTrue(said.contains("built for a different processor"), said)
+                expectTrue(said.contains(log.path), said)
+            }
+        }
+        #endif
+
         test("pid file cleanup leaves unrelated processes alone") {
             let url = temporaryFile(".pid")
             let own = ProcessInfo.processInfo.processIdentifier

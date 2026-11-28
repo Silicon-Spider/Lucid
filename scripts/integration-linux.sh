@@ -117,6 +117,12 @@ done
 if [ "$READY" = 1 ]; then ok "the engines start and Home says Lucid is ready"; else
   fail "the engines start and Home says Lucid is ready"
   state | field "[c['title'] + ': ' + c['detail'] for c in d['status']['checks'] if not c['done']]"
+  # What each engine wrote before it stopped, if it wrote anything.
+  for LOG in "$XDG_DATA_HOME"/Lucid/logs/*.log; do
+    [ -f "$LOG" ] || continue
+    echo "  the last of $(basename "$LOG") ($(wc -c < "$LOG") bytes):"
+    tail -n 15 "$LOG" | sed 's/^/    /'
+  done
 fi
 [ "$(state | field "d['app']['system']")" = Linux ] && ok "the window says it is on Linux" || fail "the window says it is on Linux"
 # Which engines are running, to tell the ones inside the app from any others.
