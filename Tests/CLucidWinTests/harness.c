@@ -507,6 +507,10 @@ static void test_system(const char *self) {
         check(lucid_mic_count() == 0, "then lets it go");
     }
 
+    /* Wine has no consoles without windows, so this is only reported. */
+    printf("Engines without console windows\n");
+    printf("        a console for them to share: %s\n", lucid_hide_consoles() ? "yes" : "no");
+
     printf("Lucid's window\n");
     /* A stand-in for the browser: this program again, which writes down how it was started. */
     SetEnvironmentVariableA("LUCID_BROWSER", self);

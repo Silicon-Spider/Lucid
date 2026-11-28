@@ -24,6 +24,39 @@ bool lucid_claim_single_instance(void) {
     return true;
 }
 
+bool lucid_hide_consoles(void) {
+    /* Started from a terminal that it is still attached to: there is a console already. */
+    if (GetConsoleCP() != 0) return true;
+
+    /* Windows has no way to ask for a console without a window. But a console program
+       started with "no window" gets one, and another program may then join it. So: start
+       the command prompt that way, join its console, and send it home. The console stays
+       for as long as Lucid is attached to it. */
+    wchar_t prompt[MAX_PATH + 16];
+    UINT length = GetSystemDirectoryW(prompt, MAX_PATH);
+    if (length == 0 || length >= MAX_PATH) return false;
+    lstrcatW(prompt, L"\\cmd.exe");
+    wchar_t command[MAX_PATH + 48];
+    wsprintfW(command, L"\"%s\" /d /c pause", prompt);
+
+    STARTUPINFOW startup;
+    PROCESS_INFORMATION process;
+    memset(&startup, 0, sizeof startup);
+    memset(&process, 0, sizeof process);
+    startup.cb = sizeof startup;
+    if (!CreateProcessW(prompt, command, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &startup, &process)) return false;
+    bool joined = false;
+    /* Its console takes a moment to exist. */
+    for (int attempt = 0; attempt < 150 && !joined; attempt++) {
+        joined = AttachConsole(process.dwProcessId) != FALSE;
+        if (!joined) Sleep(20);
+    }
+    TerminateProcess(process.hProcess, 0);
+    CloseHandle(process.hThread);
+    CloseHandle(process.hProcess);
+    return joined;
+}
+
 static LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
     switch (message) {
     case LUCID_WM_KEY:

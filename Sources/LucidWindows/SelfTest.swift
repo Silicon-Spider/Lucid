@@ -59,6 +59,7 @@ enum SelfTest {
         report.note("listening for the dictation key: \(lucid_keyboard_watched())")
         report.note("microphones: \(lucid_mic_devices()), allowed by Windows: \(lucid_mic_allowed())")
         report.note("opens at sign-in: \(lucid_opens_at_login())")
+        report.note("a console without a window for the engines: \(lucid_hide_consoles())")
         let front = shell.captureTarget()
         report.note("app in front: \(front.appName) (\(front.appID ?? "none"))")
         report.note("status: \(app.statusLine)")

@@ -99,6 +99,8 @@ final class WindowsApp {
 
     /// Runs until the user quits. Returns the exit code.
     func run() -> Int32 {
+        // Before the engines start: they are console programs, and would each open a window.
+        lucid_hide_consoles()
         desk.start()
         if !desk.settings.current.welcomed {
             // The window opens by itself only the first time, to show how Lucid works.

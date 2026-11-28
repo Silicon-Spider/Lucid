@@ -163,8 +163,20 @@ size_t lucid_choose_file(const char *title, const char *kinds, const char *patte
 
     /* The request comes from Lucid's page in the browser, so the chooser would open behind
        it. A window that stays on top, to own the chooser, keeps it in front. */
+    POINT pointer = {0, 0};
+    GetCursorPos(&pointer);
+    MONITORINFO monitor;
+    memset(&monitor, 0, sizeof monitor);
+    monitor.cbSize = sizeof monitor;
+    POINT centre = {GetSystemMetrics(SM_CXSCREEN) / 2, GetSystemMetrics(SM_CYSCREEN) / 2};
+    if (GetMonitorInfoW(MonitorFromPoint(pointer, MONITOR_DEFAULTTOPRIMARY), &monitor)) {
+        centre.x = (monitor.rcWork.left + monitor.rcWork.right) / 2;
+        centre.y = (monitor.rcWork.top + monitor.rcWork.bottom) / 2;
+    }
+    /* In the middle of the screen the user is on, since that is where the chooser opens. */
     HWND owner = CreateWindowExW(
-        WS_EX_TOPMOST | WS_EX_TOOLWINDOW, L"STATIC", L"", WS_POPUP, 0, 0, 0, 0, NULL, NULL, GetModuleHandleW(NULL), NULL);
+        WS_EX_TOPMOST | WS_EX_TOOLWINDOW, L"STATIC", L"", WS_POPUP, centre.x, centre.y, 0, 0,
+        NULL, NULL, GetModuleHandleW(NULL), NULL);
     if (owner) bring_forward(owner);
 
     wchar_t path[2048];

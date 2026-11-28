@@ -66,6 +66,10 @@ typedef struct {
 
 /* False when Lucid is already running. That copy has been asked to show its window. */
 bool lucid_claim_single_instance(void);
+/* Lucid's engines are console programs, and Windows opens a console window for each one
+   that an app starts. This gives Lucid a console with no window, which they then share.
+   Call it before starting them. False if Windows would not, and the windows will show. */
+bool lucid_hide_consoles(void);
 /* Creates the tray icon and the pill, and starts watching the keyboard. False when
    Windows would not even give Lucid a window. */
 bool lucid_start(const LucidCallbacks *callbacks);

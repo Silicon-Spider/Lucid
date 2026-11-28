@@ -32,13 +32,16 @@ func localServerTests() async {
             expectEqual(status, 200)
             expectEqual(String(decoding: body, as: UTF8.self), "GET|/a b/c|two words!|yes|")
 
-            let sent = Data(String(repeating: "héllo ", count: 20_000).utf8)
+            // Long enough to arrive in several pieces. Not longer: on Windows, Foundation's own
+            // page fetcher stops part of the way through sending more than 128 KB. The next
+            // test sends a larger body with curl.
+            let sent = Data(String(repeating: "héllo ", count: 8_000).utf8)
             let (postStatus, echoed) = try await fetch(server.address + "/post", method: "POST", body: sent)
             expectEqual(postStatus, 200)
             expectEqual(String(decoding: echoed, as: UTF8.self), "POST|/post|-|-|" + String(decoding: sent, as: UTF8.self))
         }
 
-        await asyncTest("tells a client that asks first to go ahead and send its body") {
+        await asyncTest("takes a large body, and tells a client that asks first to go ahead and send it") {
             let server = try LocalServer { request in .text("got \(request.body.count) bytes") }
             server.start()
             defer { server.stop() }
