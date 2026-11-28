@@ -42,17 +42,20 @@ function Find-Download([string]$Repository, [string[]]$Wanted, [string[]]$Unwant
     if ($env:GITHUB_TOKEN) { $headers['Authorization'] = "Bearer $env:GITHUB_TOKEN" }
     # Not wrapped in @(): that would make the whole list one item, and the loop would run once.
     $releases = Invoke-RestMethod "https://api.github.com/repos/$Repository/releases?per_page=30" -Headers $headers
-    foreach ($release in $releases) {
-        if ($release.draft -or $release.prerelease) { continue }
-        $fits = @($release.assets | Where-Object { $_.name -like '*.zip' } | Where-Object {
-            $name = $_.name.ToLower()
-            $missing = @($Wanted | Where-Object { $name -notlike "*$_*" })
-            $present = @($Unwanted | Where-Object { $name -like "*$_*" })
-            ($missing.Count -eq 0) -and ($present.Count -eq 0)
-        } | Sort-Object { $_.name.Length })
-        if ($fits.Count -gt 0) {
-            Write-Host "found    $($fits[0].name) in $Repository $($release.tag_name)"
-            return $fits[0]
+    # Full releases first. llama.cpp marks every release a pre-release, so those come second.
+    foreach ($early in @($false, $true)) {
+        foreach ($release in $releases) {
+            if ($release.draft -or ([bool]$release.prerelease -ne $early)) { continue }
+            $fits = @($release.assets | Where-Object { $_.name -like '*.zip' } | Where-Object {
+                $name = $_.name.ToLower()
+                $missing = @($Wanted | Where-Object { $name -notlike "*$_*" })
+                $present = @($Unwanted | Where-Object { $name -like "*$_*" })
+                ($missing.Count -eq 0) -and ($present.Count -eq 0)
+            } | Sort-Object { $_.name.Length })
+            if ($fits.Count -gt 0) {
+                Write-Host "found    $($fits[0].name) in $Repository $($release.tag_name)"
+                return $fits[0]
+            }
         }
     }
     Write-Host "None of the latest releases of $Repository has a download that suits this PC. They offer:"
