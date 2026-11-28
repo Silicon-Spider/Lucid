@@ -80,7 +80,10 @@ static void key_changed(int code, bool down) {
 static bool x11_begin(void) {
     watch_display = XOpenDisplay(NULL);
     if (!watch_display) return false;
-    int event = 0, error = 0, major = 2, minor = 0;
+    /* Version 2.1 or later, where keys are reported even while another app has taken the
+       keyboard for itself, as a menu or a game does. A server that only knows 2.0 says so
+       and is used as it is. */
+    int event = 0, error = 0, major = 2, minor = 2;
     if (!XQueryExtension(watch_display, "XInputExtension", &input_opcode, &event, &error)
         || XIQueryVersion(watch_display, &major, &minor) != Success) {
         XCloseDisplay(watch_display);

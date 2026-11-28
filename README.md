@@ -1,7 +1,7 @@
 # Lucid
 
-Hold a key, speak, let go. Clean text appears where your cursor is, in any app, on a Mac
-or a Windows PC.
+Hold a key, speak, let go. Clean text appears where your cursor is, in any app, on a Mac,
+a Windows PC or a Linux desktop.
 
 Lucid removes the "um"s, the false starts and the "no wait, I meant…" before the text
 lands, so what you get reads as if you had typed it. Everything runs on your own computer.
@@ -26,10 +26,15 @@ dictation key, typing into another program's window, the clipboard, the pill and
 icon. Nobody has yet used it for a day's work on a real PC with a real microphone, so
 expect rough edges, and see [what differs on Windows](#windows).
 
+The Linux app is the newest. A program runs the whole of it, with the real engines, on a
+desktop that exists only in memory: it holds the key, speaks a sentence in a synthesised
+voice, and checks that the cleaned sentence is typed into an editor. Nobody has yet used it
+on a real desktop with a real microphone, and what it does in a Wayland session has only
+been tried with stand-ins for the keyboard. See [what differs on Linux](#linux).
+
 ## Requirements
 
-These are for the Mac. For a PC, see [Windows](#windows). On Linux the command-line tool
-works: see [Linux](#linux).
+These are for the Mac. For a PC, see [Windows](#windows) or [Linux](#linux).
 
 - A Mac with Apple Silicon, running macOS 14 or later.
 - [Homebrew](https://brew.sh).
@@ -45,6 +50,10 @@ scripts/setup.sh        # installs the engines, downloads the models (about 1 GB
 scripts/build-app.sh    # builds dist/Lucid.app
 open dist/Lucid.app
 ```
+
+After that, Lucid opens like any other app: double-click `dist/Lucid.app` in the Finder, or
+drag it to Applications first. On [Windows](#windows) and [Linux](#linux), the setup script
+adds it to the Start menu or the applications menu.
 
 A waveform icon appears in the menu bar, and Lucid's window opens at Home. Its Setup list
 walks you through four things:
@@ -256,14 +265,71 @@ on recordings: `scripts\integration.ps1` runs the whole pipeline on synthesised 
 
 ## Linux
 
-There is no app for Linux. Everything underneath the apps runs there through `lucid-cli`:
-speech to text, cleanup with its guardrails, your dictionary, and downloading, renaming
-and deleting models. You give it a recording and it gives you clean text.
+Lucid for Linux sits in the panel. Hold **Right Ctrl** and speak, then let go: the text is
+pasted into the app you are in, terminals included. Tap the key twice to keep recording
+hands-free, and press Escape to cancel. The pill at the bottom of the screen shows the
+microphone level and the last words heard.
 
-Put `whisper-server` and `llama-server` on the PATH, or in folders of their own inside the
-engines folder, and download the models with `lucid-cli download`. `lucid-cli doctor` says
-what is missing and where it is expected. `lucid-cli window` opens Lucid's window as a page
-in your browser, for the models, dictionary, history and settings.
+It needs a 64-bit Linux desktop, about 1.1 GB of disk for the models,
+[Swift](https://www.swift.org/install/linux) to build it, and git, curl, cmake and a C++
+compiler to build the speech engine. The app is built on GTK. On Ubuntu or Debian:
+
+```bash
+sudo apt-get install libgtk-3-dev libayatana-appindicator3-dev libxi-dev libxtst-dev cmake g++ git curl
+```
+
+```bash
+git clone https://github.com/Silicon-Spider/Lucid.git
+cd Lucid
+scripts/setup-linux.sh    # the engines, the models (about 1 GB), the app, and a menu entry
+```
+
+On another kind of Linux, `scripts/setup-linux.sh` names the packages it is missing.
+
+Then open **Lucid** from your applications menu, as you would any other app: no terminal is
+needed again. The first time, its window opens, and Home lists anything that is still
+missing. After that it stays out of the way. Click its icon in the panel for the cleanup
+level, the dictation key, recent dictations, and **Open Lucid…**. Settings has a switch to
+open it when you sign in.
+
+The window has the same parts as on the Mac. What differs:
+
+- **Wayland.** A Wayland session does not show an app the keys you press in other apps, and
+  does not let one app press keys in another. So there, out of the box, the dictation key
+  does nothing, and Home says so. There are two ways round it. Sign in with an X11 session
+  (“Ubuntu on Xorg”, “Plasma (X11)”), where everything works as described. Or run
+  `scripts/setup-linux.sh --allow-keys`, which lets the programs you run read the keyboards
+  and make one of their own: Lucid then sees the key and can paste. That is the same access
+  every program has in an X11 session, and you can undo it by deleting the file it names.
+- **The icon.** Lucid's icon needs a panel that shows app indicators. Ubuntu, KDE, XFCE and
+  Cinnamon do. GNOME elsewhere needs the “AppIndicator and KStatusNotifierItem Support”
+  extension. Without an icon Lucid still works: open it again from the applications menu and
+  its window comes up.
+- The dictation key is Right Ctrl, Right Alt or Right Shift.
+- Lucid pastes with Shift+Insert, which works in terminals where Ctrl+V does not. For that
+  it also puts the text where a terminal pastes from, the selection.
+- If text was on the clipboard, it is put back after the paste. A copied picture or file is
+  not: it is gone from the clipboard after a dictation.
+- Escape cancels a recording, but Lucid cannot keep it from the app in front, which gets it
+  too.
+- Lucid cannot tell a password box from any other, so do not dictate into one.
+- Linux does not say what is before the cursor, so Lucid cannot add the space between your
+  last word and the dictation. Type it yourself.
+- The window is a page that Lucid serves to this computer only. With Chromium, Chrome, Edge,
+  Brave or Vivaldi installed, it opens in a window of its own, in a profile apart from your
+  browsing. Otherwise it opens as a tab in your usual browser. Set `LUCID_BROWSER` to choose.
+- Recording is done by `parec`, `pw-record` or `arecord`, whichever is installed, from the
+  microphone chosen in your sound settings.
+- Speech recognition runs on the processor alone, so Lucid's usual speech model is slow.
+  Choose **Whisper base.en** or **Whisper small.en** under Models, or set up with
+  `scripts/setup-linux.sh --speech-model ggml-base.en.bin`.
+- Building prints a warning about “prohibited flags: -pthread”. It comes from the way GTK
+  describes itself and does no harm.
+
+Without GTK installed, as on a server, `swift build` leaves the app out and builds
+`lucid-cli` and the tests. `scripts/setup-linux.sh --no-app` sets that up, and
+`lucid-cli window` opens Lucid's window as a page in a browser, for the models, dictionary,
+history and settings.
 
 ## Check it works
 
@@ -278,17 +344,27 @@ scripts/integration.sh    # the whole pipeline on synthesised speech
 - builds Lucid on a Mac, runs the unit tests, and draws the app's windows with
   `Lucid --render-ui`. The drawings are PNG files in the `ui` download under Artifacts, on
   the run's page.
-- builds `lucid-cli` and runs the unit tests on Linux.
+- builds the Linux app and runs the unit tests on Linux. Then, on a desktop that exists
+  only in memory, it runs the tests of the part that talks to the desktop
+  (`Tests/CLucidDeskTests/linux.c`): the dictation key, typing into another program's window
+  and into a terminal, the clipboard, the tray menu, the pill, recording from a made-up
+  microphone, and what Lucid does instead in a Wayland session. Last, it starts the app with
+  `--self-test`. The pictures are in the `linux` download.
+- on Linux, runs `scripts/setup-linux.sh` and `scripts/integration-linux.sh`: the whole app
+  with the real engines. It holds the dictation key, says a sentence into the made-up
+  microphone in a synthesised voice, and checks that the cleaned sentence is typed into an
+  editor. Pictures of the screen while it speaks are in the `linux-app` download.
 - builds the Windows app and runs the unit tests on Windows. Then it runs the tests of the
-  part that talks to Windows (`Tests/CLucidWinTests`): pressing the dictation key, typing
+  part that talks to Windows (`Tests/CLucidDeskTests/windows.c`): pressing the dictation key, typing
   into another program's window, the clipboard, the tray menu and the pill. Last, it starts
   the app with `--self-test`. Pictures of the pill and the tray icon as Windows drew them
   are in the `windows` download under Artifacts.
 - on Windows, runs `scripts\setup.ps1` and `scripts\integration.ps1`: the real engines and
   models, turning synthesised speech into clean text.
 
-`scripts/test-windows-layer.sh` runs the same tests of the Windows part on Linux, under
-Wine, with a made-up microphone that plays a tone.
+On a Linux computer, `scripts/test-linux-layer.sh` and `scripts/integration-linux.sh` run
+those checks of the Linux app, and `scripts/test-windows-layer.sh` runs the tests of the
+Windows part under Wine. None of them touches your desktop: each makes one of its own.
 
 The Mac's own end-to-end check, `scripts/integration.sh`, is not part of CI. Run it by hand.
 
@@ -313,6 +389,11 @@ step 2, the pill in step 6 says "Copied. Press Ctrl+V", Lucid is opened and quit
 icon beside the clock, and in step 9 Task Manager shows no `whisper-server` or
 `llama-server`.
 
+On Linux, in an X11 session: use any text editor for step 1, skip step 2, the pill in step
+6 says "Copied. Press Ctrl+V", Lucid is opened from the applications menu and quit from its
+icon in the panel, and step 9 is the same command. Also dictate into a terminal: the text
+appears at the prompt.
+
 ## Troubleshooting
 
 | Problem | Try |
@@ -327,17 +408,21 @@ icon beside the clock, and in step 9 Task Manager shows no `whisper-server` or
 | On Windows, the key does nothing | Look for Lucid's icon beside the clock, behind the **^** arrow if need be. If it is missing, open Lucid from the Start menu. If a program that runs as administrator is in front, Windows keeps the key from Lucid. |
 | On Windows, the window does not open | Lucid's window needs Microsoft Edge, or another browser built on Chromium: set `LUCID_BROWSER` to its path. |
 | On Windows, nothing is heard | Home, in Lucid's window, says whether Windows has a microphone and lets apps use it, with a button to the right page of Settings. |
-| Something else | Engine logs are in `~/Library/Logs/Lucid/` on a Mac and in `%LOCALAPPDATA%\Lucid\logs` on Windows. They never contain what you said. |
+| On Linux, the key does nothing | Open Lucid from the applications menu: Home says why. In a Wayland session it is expected, and Home says what to do. |
+| On Linux, there is no icon in the panel | The panel does not show app indicators. Open Lucid again from the applications menu to get its window, or add the extension named under [Linux](#linux). |
+| On Linux, the text is copied but not typed | In a Wayland session Lucid may not press keys until you allow it: see [Linux](#linux). Press Ctrl+V, or Ctrl+Shift+V in a terminal. |
+| Something else | Engine logs are in `~/Library/Logs/Lucid/` on a Mac, in `%LOCALAPPDATA%\Lucid\logs` on Windows, and in `~/.local/share/Lucid/logs` on Linux. They never contain what you said. |
 
 ## Limits
 
 - English only.
-- There are apps for the Mac and for Windows. On Linux only `lucid-cli` works, on recordings.
-- The Windows app has to be built from source, and has had far less use than the Mac app.
-  See [what differs on Windows](#windows).
-- Lucid uses the computer's default microphone. Change it in System Settings, Sound, or in
-  Windows' Sound settings.
+- The Windows and Linux apps have to be built from source, and have had far less use than
+  the Mac app. See what differs on [Windows](#windows) and on [Linux](#linux).
+- On Linux in a Wayland session, the dictation key and pasting only work once you allow
+  them, as [Linux](#linux) explains.
+- Lucid uses the computer's default microphone. Change it in the system's sound settings.
 - Pasting uses ⌘V, or Ctrl+V on Windows, so it assumes a keyboard layout where that works.
+  On Linux it uses Shift+Insert, which is the same on every layout.
 - Speech recognition was measured with synthesised speech, not a range of real voices and
   rooms. See [`docs/benchmarks.md`](docs/benchmarks.md) for what was and was not tested.
 

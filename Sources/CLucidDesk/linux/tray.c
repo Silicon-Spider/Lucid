@@ -9,7 +9,7 @@
 
    A Linux desktop shows the menu itself, from a description Lucid gives it, and does not
    say when it is about to. So the menu is made again whenever the app says something has
-   changed, and every couple of seconds in case something else has. */
+   changed, and every few seconds in case something else has. */
 
 #define MOST_ITEMS 96
 
@@ -173,7 +173,7 @@ void lucid_tray_make(void) {
         menu = gtk_menu_new();
         app_indicator_set_menu(indicator, GTK_MENU(menu));
     }
-    refresh_timer = g_timeout_add_seconds(2, refresh_later, NULL);
+    refresh_timer = g_timeout_add_seconds(5, refresh_later, NULL);
 }
 
 void lucid_tray_destroy(void) {

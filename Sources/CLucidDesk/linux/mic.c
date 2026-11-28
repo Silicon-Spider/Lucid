@@ -112,18 +112,29 @@ static void *read_sound(void *unused) {
 
 /* Ends the recording program and takes in what it had still to say. */
 static void end_recording(void) {
-    if (child > 0) kill(child, SIGTERM);
+    if (child > 0) {
+        kill(child, SIGTERM);
+        /* It stops at once as a rule. One that does not is stopped by force, so that
+           whoever is waiting here, which is the whole app, is not kept for long. */
+        int status = 0;
+        bool gone = false;
+        for (int attempt = 0; attempt < 40 && !gone; attempt++) {
+            gone = waitpid(child, &status, WNOHANG) != 0;
+            if (!gone) g_usleep(10000);
+        }
+        if (!gone) {
+            kill(child, SIGKILL);
+            waitpid(child, &status, 0);
+        }
+    }
+    child = 0;
+    /* With the program gone, the pipe ends, and the reader with it. */
     if (reading) {
         pthread_join(reader, NULL);
         reading = false;
     }
     if (child_output >= 0) close(child_output);
     child_output = -1;
-    if (child > 0) {
-        int status = 0;
-        waitpid(child, &status, 0);
-    }
-    child = 0;
     level_millionths = 0;
 }
 
@@ -190,16 +201,16 @@ bool lucid_mic_start(void) {
 
     const Recorder *recorder = find_recorder();
     if (!recorder) return false;
+    /* Closed in every other program Lucid starts meanwhile: one that kept the far end open
+       would keep the pipe from ever ending. */
     int ends[2];
-    if (pipe(ends) != 0) return false;
+    if (pipe2(ends, O_CLOEXEC) != 0) return false;
 
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
     posix_spawn_file_actions_adddup2(&actions, ends[1], STDOUT_FILENO);
     posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
     posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
-    posix_spawn_file_actions_addclose(&actions, ends[0]);
-    posix_spawn_file_actions_addclose(&actions, ends[1]);
     pid_t started = 0;
     int failed = posix_spawnp(&started, recorder->program, &actions, NULL, (char *const *)recorder->arguments, environ);
     posix_spawn_file_actions_destroy(&actions);
